@@ -1,4 +1,11 @@
 @import 'tailwindcss';
+@plugin 'flyonui' {
+    themes:
+        light --default,
+        dark --prefersdark;
+}
+/* Variants only (e.g. overlay-open:). FlyonUI's own JS is deliberately not used; see components/ui. */
+@import 'flyonui/variants.css';
 
 @source '../views';
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
