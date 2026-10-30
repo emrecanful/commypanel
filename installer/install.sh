@@ -2,7 +2,7 @@
 # CommyPanel installer: downloads a release, checks its checksum, unpacks it
 # and hands over to the setup script inside it.
 #
-#   curl -fsSL https://github.com/commypanel/commypanel/releases/latest/download/install.sh | sudo bash
+#   curl -fsSL https://github.com/emrecanful/commypanel/releases/latest/download/install.sh | sudo bash
 #
 # Options (all optional):
 #   --version X       install version X instead of the latest
@@ -12,8 +12,7 @@
 #   --render-only     only write config files below COMMYPANEL_ROOT (testing)
 set -Eeuo pipefail
 
-# TODO: set this to the real GitHub repository before publishing.
-REPO="${COMMYPANEL_REPO:-commypanel/commypanel}"
+REPO="${COMMYPANEL_REPO:-emrecanful/commypanel}"
 PREFIX="/opt/commypanel"
 
 VERSION="latest"
