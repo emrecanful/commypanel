@@ -9,6 +9,7 @@ type Props = { title: string; children: ReactNode };
 const links = [
     { href: '/dashboard', label: 'Dashboard' },
     { href: '/settings/security', label: 'Security' },
+    { href: '/settings/audit-log', label: 'Audit log' },
 ];
 
 export default function AppLayout({ title, children }: Props) {

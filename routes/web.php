@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\SetupController;
 use Illuminate\Support\Facades\Route;
 
@@ -15,4 +16,5 @@ Route::middleware('auth')->group(function () {
     Route::inertia('/settings/security', 'settings/security')
         ->middleware('password.confirm')
         ->name('settings.security');
+    Route::get('/settings/audit-log', [AuditLogController::class, 'index'])->name('settings.audit-log');
 });

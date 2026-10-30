@@ -2,11 +2,14 @@
 
 namespace App\Providers;
 
+use App\Audit\AuditEventSubscriber;
+use App\Audit\AuditLogger;
 use App\Host\Drivers\FakeHostDriver;
 use App\Host\HostDriver;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use RuntimeException;
@@ -18,6 +21,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->scoped(AuditLogger::class);
+
         $this->app->singleton(HostDriver::class, fn (): HostDriver => match (config('commypanel.host_driver')) {
             'fake' => new FakeHostDriver,
             'agent' => throw new RuntimeException('The agent host driver is not implemented yet.'),
@@ -31,6 +36,8 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+
+        Event::subscribe(AuditEventSubscriber::class);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Audit\AuditLogger;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
@@ -12,7 +13,7 @@ class AdminResetCommand extends Command
 
     protected $description = 'Set a new random password for an admin and switch off its two-factor authentication';
 
-    public function handle(): int
+    public function handle(AuditLogger $audit): int
     {
         $email = $this->argument('email') ?? $this->ask('Email of the account to reset');
 
@@ -33,6 +34,8 @@ class AdminResetCommand extends Command
             'two_factor_confirmed_at' => null,
             'remember_token' => null,
         ])->save();
+
+        $audit->record('admin.reset', $user, ['source' => 'cli', 'target' => $user->email]);
 
         $this->components->info("Account {$user->email} reset. Two-factor authentication is now off.");
         $this->line("  New password: {$password}");

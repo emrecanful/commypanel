@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\AuditLogger;
 use App\Models\SetupToken;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -21,7 +22,7 @@ class SetupController extends Controller
         return Inertia::render('auth/setup', ['token' => $token]);
     }
 
-    public function store(Request $request, string $token): RedirectResponse
+    public function store(Request $request, string $token, AuditLogger $audit): RedirectResponse
     {
         $this->authorizeSetup($token);
 
@@ -40,6 +41,8 @@ class SetupController extends Controller
 
             return User::query()->create([...$data, 'email_verified_at' => now()]);
         });
+
+        $audit->record('setup.completed', $user);
 
         Auth::login($user);
         $request->session()->regenerate();
