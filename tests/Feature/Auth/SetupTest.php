@@ -25,11 +25,11 @@ it('prints a setup url that renders the setup page', function () {
         ->assertInertia(fn (Assert $page) => $page->component('auth/setup')->where('token', $token));
 });
 
-it('creates the first admin, logs in and sends them to security settings', function () {
+it('creates the first admin, logs in and sends them to the welcome steps', function () {
     $token = app(IssueSetupToken::class)();
 
     $this->post("/setup/{$token}", validSetupInput())
-        ->assertRedirect('/settings/security');
+        ->assertRedirect('/welcome');
 
     $user = User::query()->firstOrFail();
     expect($user->email)->toBe('admin@example.com');

@@ -18,7 +18,7 @@ type Props = {
     showApp?: boolean;
 };
 
-function RecordsTable({
+export function RecordsTable({
     domain,
     server,
 }: {

@@ -38,6 +38,10 @@ return [
     |
     */
 
+    // Loopback-only port where nginx serves the panel over plain HTTP, so the
+    // agent-managed site for the panel's own domain can proxy to it.
+    'panel_internal_port' => (int) env('PANEL_INTERNAL_PORT', 8081),
+
     'agent_socket' => env('AGENT_SOCKET', '/run/commypanel/agent.sock'),
 
     'agent_allow_non_linux' => (bool) env('AGENT_ALLOW_NON_LINUX', false),

@@ -13,6 +13,7 @@ use App\Http\Controllers\EnvVarController;
 use App\Http\Controllers\HttpsController;
 use App\Http\Controllers\ServerAddressController;
 use App\Http\Controllers\SetupController;
+use App\Http\Controllers\WelcomeController;
 use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/dashboard')->name('home');
@@ -50,6 +51,12 @@ Route::middleware('auth')->group(function () {
         Route::post('domains', [AppDomainController::class, 'store'])->name('domains.store');
         Route::post('certificate', [CertificateController::class, 'store'])->name('certificate.store');
     });
+
+    Route::get('welcome', [WelcomeController::class, 'show'])->name('welcome');
+    Route::post('welcome/terms', [WelcomeController::class, 'terms'])->name('welcome.terms');
+    Route::post('welcome/domain', [WelcomeController::class, 'domain'])->name('welcome.domain');
+    Route::post('welcome/domain/check', [WelcomeController::class, 'check'])->name('welcome.check');
+    Route::delete('welcome/domain', [WelcomeController::class, 'clear'])->name('welcome.clear');
 
     Route::get('domains', [DomainController::class, 'index'])->name('domains.index');
     Route::post('domains/{domain}/check', [DomainController::class, 'check'])->name('domains.check');

@@ -115,6 +115,7 @@ it('serves the panel over TLS and only ever runs index.php', function () {
     $vhost = ($this->read)('/etc/nginx/conf.d/10-commypanel-panel.conf');
 
     expect($vhost)->toContain('listen 8443 ssl;')
+        ->toContain('listen 127.0.0.1:8081;')
         ->toContain('root /opt/commypanel/current/public;')
         ->toContain('ssl_certificate /etc/commypanel/tls/panel.crt;')
         ->toContain('fastcgi_pass unix:/run/php/commypanel.sock;')

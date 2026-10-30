@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Dns\PanelDomain;
 use App\Enums\AppStatus;
 use App\Enums\DeploymentStatus;
 use App\Enums\SetupStep;
@@ -144,6 +145,11 @@ class App extends Model
         $base = Str::limit($base === '' ? 'app' : $base, self::SLUG_MAX_LENGTH - 5, '');
         $base = trim($base, '-');
         $base = strlen($base) < 2 ? 'app' : $base;
+
+        // The panel's own nginx site and certificate use this name.
+        if ($base === PanelDomain::SLUG) {
+            $base = 'panel-app';
+        }
 
         $slug = $base;
         $suffix = 2;

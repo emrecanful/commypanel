@@ -74,7 +74,7 @@ it('rejects invalid, duplicate and panel domains', function (string $input) {
     App::factory()->create(['slug' => 'shop']);
     $other = App::factory()->create();
     Domain::query()->create(['name' => 'taken.example.com', 'app_id' => $other->id]);
-    app(PanelDomain::class)->save('panel.example.com');
+    app(PanelDomain::class)->set('panel.example.com');
 
     $this->post('/apps/shop/domains', ['name' => $input, 'redirect' => 'none'])->assertSessionHasErrors('name');
 

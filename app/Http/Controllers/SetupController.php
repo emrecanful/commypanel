@@ -48,7 +48,7 @@ class SetupController extends Controller
         $request->session()->regenerate();
         $request->session()->put('auth.password_confirmed_at', time());
 
-        return redirect()->route('settings.security');
+        return redirect()->route('welcome');
     }
 
     private function authorizeSetup(string $token): void

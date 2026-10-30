@@ -3,25 +3,14 @@ import { cn } from '@/lib/utils';
 
 type Step = 'basics' | 'source' | 'settings' | 'domain';
 
-/** The horizontal progress header of the app wizard. */
-export function SetupSteps({
-    current,
-    source,
+/** A horizontal progress header; steps before `index` show as done. */
+export function Stepper({
+    steps,
+    index,
 }: {
-    current: Step;
-    source: string;
+    steps: { id: string; label: string }[];
+    index: number;
 }) {
-    const steps: { id: Step; label: string }[] = [
-        { id: 'basics', label: 'Basics' },
-        {
-            id: 'source',
-            label: source === 'upload' ? 'Upload code' : 'Repository access',
-        },
-        { id: 'settings', label: 'Settings' },
-        { id: 'domain', label: 'Domain' },
-    ];
-    const index = steps.findIndex((step) => step.id === current);
-
     return (
         <ol className="mb-6 flex flex-wrap gap-x-6 gap-y-2" aria-label="Steps">
             {steps.map((step, i) => (
@@ -55,5 +44,30 @@ export function SetupSteps({
                 </li>
             ))}
         </ol>
+    );
+}
+
+/** The progress header of the app wizard. */
+export function SetupSteps({
+    current,
+    source,
+}: {
+    current: Step;
+    source: string;
+}) {
+    const steps: { id: Step; label: string }[] = [
+        { id: 'basics', label: 'Basics' },
+        {
+            id: 'source',
+            label: source === 'upload' ? 'Upload code' : 'Repository access',
+        },
+        { id: 'settings', label: 'Settings' },
+        { id: 'domain', label: 'Domain' },
+    ];
+    return (
+        <Stepper
+            steps={steps}
+            index={steps.findIndex((step) => step.id === current)}
+        />
     );
 }

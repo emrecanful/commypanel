@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Dns\CheckDomain;
+use App\Dns\ConfigurePanelDomain;
+use App\Dns\PanelDomain;
 use App\Enums\DomainStatus;
 use App\Models\Domain;
 use Illuminate\Console\Command;
@@ -13,7 +15,7 @@ class CheckDomainsCommand extends Command
 
     protected $description = 'Re-check DNS for domains that are not connected yet, and connected ones hourly';
 
-    public function handle(CheckDomain $check): int
+    public function handle(CheckDomain $check, PanelDomain $panel, ConfigurePanelDomain $configure): int
     {
         $domains = Domain::query()
             ->where(fn ($query) => $query
@@ -24,6 +26,11 @@ class CheckDomainsCommand extends Command
 
         foreach ($domains as $domain) {
             $check($domain);
+        }
+
+        // The panel's own domain, until its certificate is in place.
+        if ($panel->name() !== null && ! $panel->certificateUsable()) {
+            $configure->check();
         }
 
         $this->components->info("Checked {$domains->count()} domain(s).");

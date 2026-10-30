@@ -21,6 +21,8 @@ DATA_DIR="/var/lib/commypanel"
 CONF_DIR="/etc/commypanel"
 NGINX_DIR="/etc/nginx"
 PANEL_PORT="${COMMYPANEL_PANEL_PORT:-8443}"
+# Loopback-only plain-HTTP listener: the agent proxies the panel's own domain to it.
+PANEL_INTERNAL_PORT=8081
 LOG_FILE="/var/log/commypanel-install.log"
 
 UPGRADE_FLAG=0
@@ -99,6 +101,7 @@ render() {
         -e "s#@@DATA_DIR@@#$(sed_escape "$DATA_DIR")#g" \
         -e "s#@@CONF_DIR@@#$(sed_escape "$CONF_DIR")#g" \
         -e "s#@@PANEL_PORT@@#$(sed_escape "$PANEL_PORT")#g" \
+        -e "s#@@PANEL_INTERNAL_PORT@@#$(sed_escape "$PANEL_INTERNAL_PORT")#g" \
         -e "s#@@PANEL_UID@@#$(sed_escape "${PANEL_UID:-}")#g" \
         -e "s#@@PHP_BIN@@#$(sed_escape "${PHP_BIN:-}")#g" \
         -e "s#@@APP_KEY@@#$(sed_escape "${APP_KEY:-}")#g" \
