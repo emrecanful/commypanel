@@ -15,7 +15,7 @@ export function Input({ label, error, hint, className, id, ...props }: Props) {
 
     return (
         <div className="w-full">
-            <label className="mb-1 label-text block" htmlFor={inputId}>
+            <label className="mb-1 label-text block px-0!" htmlFor={inputId}>
                 {label}
             </label>
             <input

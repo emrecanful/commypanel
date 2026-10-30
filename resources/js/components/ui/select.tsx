@@ -23,7 +23,7 @@ export function Select({
 
     return (
         <div className="w-full">
-            <label className="mb-1 label-text block" htmlFor={selectId}>
+            <label className="mb-1 label-text block px-0!" htmlFor={selectId}>
                 {label}
             </label>
             <select
