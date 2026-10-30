@@ -18,6 +18,10 @@ pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
     ->in('Feature');
 
+// Integration tests manage their own database files, so they do not use RefreshDatabase.
+pest()->extend(TestCase::class)
+    ->in('Integration');
+
 /*
 |--------------------------------------------------------------------------
 | Expectations

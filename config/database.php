@@ -3,6 +3,21 @@
 use Illuminate\Support\Str;
 use Pdo\Mysql;
 
+$dataPath = env('COMMYPANEL_DATA_PATH', storage_path('app/commypanel'));
+
+// Three separate SQLite files so queue workers and cache/session writes never lock app data.
+$sqlite = fn (string $file, string $env): array => [
+    'driver' => 'sqlite',
+    'url' => null,
+    'database' => env($env, $dataPath.'/db/'.$file),
+    'prefix' => '',
+    'foreign_key_constraints' => true,
+    'busy_timeout' => 5000,
+    'journal_mode' => 'wal',
+    'synchronous' => 'normal',
+    'transaction_mode' => 'DEFERRED',
+];
+
 return [
 
     /*
@@ -17,7 +32,7 @@ return [
     |
     */
 
-    'default' => env('DB_CONNECTION', 'sqlite'),
+    'default' => env('DB_CONNECTION', 'main'),
 
     /*
     |--------------------------------------------------------------------------
@@ -32,17 +47,11 @@ return [
 
     'connections' => [
 
-        'sqlite' => [
-            'driver' => 'sqlite',
-            'url' => env('DB_URL'),
-            'database' => env('DB_DATABASE', database_path('database.sqlite')),
-            'prefix' => '',
-            'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
-            'synchronous' => null,
-            'transaction_mode' => 'DEFERRED',
-        ],
+        'main' => $sqlite('main.sqlite', 'DB_MAIN_DATABASE'),
+
+        'queue' => $sqlite('queue.sqlite', 'DB_QUEUE_DATABASE'),
+
+        'cache' => $sqlite('cache.sqlite', 'DB_CACHE_DATABASE'),
 
         'mysql' => [
             'driver' => 'mysql',
