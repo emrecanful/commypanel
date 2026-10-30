@@ -1,0 +1,624 @@
+#!/usr/bin/env bash
+# CommyPanel setup. Installs CommyPanel on this server, or upgrades an existing
+# installation. It runs from an unpacked release (/opt/commypanel/releases/<version>)
+# and is safe to run again: a second run on an installed server is an upgrade.
+#
+# Normally you do not run this directly; install.sh and `commypanel upgrade` do.
+#
+# Options:
+#   --panel-port N   port of the panel's web interface (default 8443)
+#   --no-docker      do not install Docker (you manage it yourself)
+#   --upgrade        require an existing installation
+#   --render-only    write config files below $COMMYPANEL_ROOT and touch nothing else
+set -Eeuo pipefail
+
+RELEASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEMPLATES="$RELEASE_DIR/installer/templates"
+
+ROOT="${COMMYPANEL_ROOT:-}"
+PREFIX="/opt/commypanel"
+DATA_DIR="/var/lib/commypanel"
+CONF_DIR="/etc/commypanel"
+NGINX_DIR="/etc/nginx"
+PANEL_PORT="${COMMYPANEL_PANEL_PORT:-8443}"
+LOG_FILE="/var/log/commypanel-install.log"
+
+UPGRADE_FLAG=0
+RENDER_ONLY=0
+SKIP_DOCKER=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --panel-port) PANEL_PORT="${2:?--panel-port needs a value}"; shift 2 ;;
+        --no-docker) SKIP_DOCKER=1; shift ;;
+        --upgrade) UPGRADE_FLAG=1; shift ;;
+        --render-only) RENDER_ONLY=1; shift ;;
+        -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
+    esac
+done
+
+SYSTEM=1
+if [ "$RENDER_ONLY" = 1 ]; then SYSTEM=0; fi
+
+case "$PANEL_PORT" in
+    ""|*[!0-9]*) printf 'error: --panel-port must be a number.\n' >&2; exit 1 ;;
+esac
+if [ "$PANEL_PORT" -lt 1024 ] || [ "$PANEL_PORT" -gt 65535 ] || [ "$PANEL_PORT" = 8080 ]; then
+    printf 'error: --panel-port must be between 1024 and 65535 (and not 8080, which apps commonly use).\n' >&2
+    exit 1
+fi
+if [ "$RENDER_ONLY" = 1 ] && [ -z "$ROOT" ]; then
+    printf 'error: --render-only needs COMMYPANEL_ROOT to point at a scratch directory.\n' >&2
+    exit 1
+fi
+
+# ----------------------------------------------------------------- helpers
+
+log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+on_error() {
+    local status=$1 line=$2
+    trap - ERR
+    printf '\033[1;31merror:\033[0m Setup stopped at line %s (exit status %s).\n' "$line" "$status" >&2
+    if [ "$SYSTEM" = 1 ]; then printf 'The full log is in %s\n' "$LOG_FILE" >&2; fi
+    exit "$status"
+}
+trap 'on_error $? $LINENO' ERR
+
+# Path below the (test) root.
+p() { printf '%s%s' "$ROOT" "$1"; }
+
+# Run a system-changing command, unless we are only rendering files.
+sys() {
+    if [ "$SYSTEM" = 1 ]; then
+        "$@"
+    fi
+}
+
+# mkd MODE OWNER GROUP PATH: create a directory with the given ownership.
+mkd() {
+    if [ "$SYSTEM" = 1 ]; then
+        install -d -m "$1" -o "$2" -g "$3" "$4"
+    else
+        mkdir -p "$4"
+    fi
+}
+
+# Escape a value for use on the right-hand side of a sed substitution.
+sed_escape() { printf '%s' "$1" | sed -e 's/[\\&#]/\\&/g'; }
+
+# render SRC DEST MODE: fill in the @@PLACEHOLDERS@@ of a template.
+render() {
+    local src=$1 dest=$2 mode=$3
+    mkdir -p "$(dirname "$dest")"
+    sed \
+        -e "s#@@PREFIX@@#$(sed_escape "$PREFIX")#g" \
+        -e "s#@@DATA_DIR@@#$(sed_escape "$DATA_DIR")#g" \
+        -e "s#@@CONF_DIR@@#$(sed_escape "$CONF_DIR")#g" \
+        -e "s#@@PANEL_PORT@@#$(sed_escape "$PANEL_PORT")#g" \
+        -e "s#@@PANEL_UID@@#$(sed_escape "${PANEL_UID:-}")#g" \
+        -e "s#@@PHP_BIN@@#$(sed_escape "${PHP_BIN:-}")#g" \
+        -e "s#@@APP_KEY@@#$(sed_escape "${APP_KEY:-}")#g" \
+        -e "s#@@APP_URL@@#$(sed_escape "${APP_URL:-}")#g" \
+        "$src" > "$dest.tmp"
+    if grep -q '@@' "$dest.tmp"; then
+        rm -f "$dest.tmp"
+        die "Template $src still has unfilled placeholders."
+    fi
+    chmod "$mode" "$dest.tmp"
+    mv "$dest.tmp" "$dest"
+}
+
+# conf_get KEY: read a value from the install state file.
+conf_get() {
+    local file
+    file="$(p "$CONF_DIR/install.conf")"
+    if [ -f "$file" ]; then
+        grep "^$1=" "$file" | tail -n 1 | cut -d= -f2- || true
+    fi
+}
+
+conf_set() {
+    local file key=$1 value=$2
+    file="$(p "$CONF_DIR/install.conf")"
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+    grep -v "^$key=" "$file" > "$file.tmp" || true
+    printf '%s=%s\n' "$key" "$value" >> "$file.tmp"
+    mv "$file.tmp" "$file"
+}
+
+as_panel() {
+    ( cd "$RELEASE_DIR" && runuser -u commypanel -- env LARAVEL_STORAGE_PATH="$DATA_DIR/storage" "$PHP_BIN" artisan "$@" )
+}
+
+# ---------------------------------------------------------------- preflight
+
+unsupported() {
+    if [ "${COMMYPANEL_ALLOW_UNSUPPORTED:-0}" = 1 ]; then
+        warn "$1 This system is not supported; continuing because COMMYPANEL_ALLOW_UNSUPPORTED=1."
+    else
+        die "$1 CommyPanel supports Ubuntu 24.04 and 26.04, and Debian 13 or newer. (Set COMMYPANEL_ALLOW_UNSUPPORTED=1 to try anyway, at your own risk.)"
+    fi
+}
+
+detect_os() {
+    [ -r /etc/os-release ] || die "Cannot read /etc/os-release."
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+    OS_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+    case "$OS_ID" in
+        ubuntu)
+            case "${VERSION_ID:-}" in
+                24.04|26.04) ;;
+                *) unsupported "Ubuntu ${VERSION_ID:-?} is not supported." ;;
+            esac
+            ;;
+        debian)
+            local major="${VERSION_ID%%.*}"
+            case "$major" in
+                ""|*[!0-9]*) unsupported "Could not read the Debian version." ;;
+                *) if [ "$major" -lt 13 ]; then unsupported "Debian $major is not supported (it ships PHP older than 8.3)."; fi ;;
+            esac
+            ;;
+        *) unsupported "${PRETTY_NAME:-This distribution} is not supported." ;;
+    esac
+}
+
+detect_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) ARCH=amd64 ;;
+        aarch64|arm64) ARCH=arm64 ;;
+        *) die "Unsupported CPU architecture: $(uname -m)." ;;
+    esac
+}
+
+port_owner() {
+    # Prints the name of the process listening on TCP port $1, if any.
+    ss -ltnpH "sport = :$1" 2>/dev/null | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -n 1
+}
+
+preflight() {
+    if [ "$SYSTEM" != 1 ]; then
+        ARCH="${COMMYPANEL_ARCH:-amd64}"
+        return 0
+    fi
+
+    [ "$(id -u)" -eq 0 ] || die "Run this as root."
+    [ -d /run/systemd/system ] || die "systemd is required."
+    detect_os
+    detect_arch
+
+    case "$RELEASE_DIR" in
+        "$PREFIX"/releases/*) ;;
+        *) die "setup.sh must run from $PREFIX/releases/<version> (use install.sh)." ;;
+    esac
+
+    if [ "$UPGRADE" = 0 ]; then
+        local owner
+        for port in 80 "$PANEL_PORT"; do
+            owner="$(port_owner "$port")"
+            if [ -n "$owner" ] && [ "$owner" != "nginx" ]; then
+                die "Port $port is already used by '$owner'. Stop it first (for example: systemctl disable --now $owner)."
+            fi
+        done
+    fi
+
+    local mem_kb
+    mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+    if [ "${mem_kb:-0}" -lt 900000 ]; then
+        warn "This server has less than 1 GB of RAM. Building apps may run out of memory."
+    fi
+}
+
+# ----------------------------------------------------------------- packages
+
+install_docker() {
+    if command -v docker >/dev/null 2>&1; then
+        log "Docker is already installed"
+        return 0
+    fi
+
+    log "Installing Docker"
+    local list=/etc/apt/sources.list.d/docker.list key=/etc/apt/keyrings/docker.asc
+    install -m 0755 -d /etc/apt/keyrings
+    if [ -n "$OS_CODENAME" ] \
+        && curl -fsSL "https://download.docker.com/linux/$OS_ID/gpg" -o "$key" \
+        && curl -fsI "https://download.docker.com/linux/$OS_ID/dists/$OS_CODENAME/Release" >/dev/null 2>&1; then
+        chmod a+r "$key"
+        printf 'deb [arch=%s signed-by=%s] https://download.docker.com/linux/%s %s stable\n' \
+            "$(dpkg --print-architecture)" "$key" "$OS_ID" "$OS_CODENAME" > "$list"
+        apt-get update -qq
+        apt-get install -y -qq docker-ce docker-ce-cli containerd.io
+    else
+        warn "Docker's own repository does not list '$OS_CODENAME' yet; using the distribution's docker.io package."
+        rm -f "$list"
+        apt-get install -y -qq docker.io
+    fi
+}
+
+install_packages() {
+    if [ "$SYSTEM" != 1 ]; then return 0; fi
+
+    log "Installing packages (nginx, PHP, Git, SQLite tools)"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends \
+        nginx php-cli php-fpm php-sqlite3 php-mbstring php-xml php-curl php-zip php-intl \
+        git openssh-client curl ca-certificates gnupg sqlite3 openssl unzip iproute2 util-linux
+    if [ "$SKIP_DOCKER" = 0 ]; then install_docker; fi
+}
+
+detect_php() {
+    if [ "$SYSTEM" != 1 ]; then
+        PHP_BIN="${COMMYPANEL_PHP_BIN:-/usr/bin/php}"
+        PHP_VER="${COMMYPANEL_PHP_VERSION:-8.4}"
+        return 0
+    fi
+
+    PHP_BIN="$(command -v php)" || die "PHP was not installed."
+    PHP_VER="$("$PHP_BIN" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')"
+    "$PHP_BIN" -r 'exit(version_compare(PHP_VERSION, "8.3.0", ">=") ? 0 : 1);' \
+        || die "PHP 8.3 or newer is required, but this server has PHP $PHP_VER."
+    "$PHP_BIN" -r 'foreach (["intl", "mbstring", "pdo_sqlite", "curl", "xml", "zip", "pcntl"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "missing PHP extension: $e\n"); exit(1); } }' \
+        || die "A required PHP extension is missing."
+}
+
+# --------------------------------------------------------- users and folders
+
+create_user_and_dirs() {
+    if [ "$SYSTEM" = 1 ]; then
+        getent group commypanel >/dev/null || groupadd --system commypanel
+        id commypanel >/dev/null 2>&1 \
+            || useradd --system --gid commypanel --home-dir "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin commypanel
+        PANEL_UID="$(id -u commypanel)"
+    else
+        PANEL_UID="${COMMYPANEL_PANEL_UID:-999}"
+    fi
+
+    log "Preparing directories"
+    # 0751: nginx must be able to reach acme-webroot below, but not list anything.
+    mkd 0751 commypanel commypanel "$(p "$DATA_DIR")"
+    mkd 0700 commypanel commypanel "$(p "$DATA_DIR/db")"
+    mkd 0700 commypanel commypanel "$(p "$DATA_DIR/tmp")"
+    mkd 0750 commypanel commypanel "$(p "$DATA_DIR/builds")"
+    mkd 0750 commypanel commypanel "$(p "$DATA_DIR/bootstrap-cache")"
+    mkd 0750 commypanel commypanel "$(p "$DATA_DIR/storage")"
+    local sub
+    for sub in logs framework/cache framework/sessions framework/views; do
+        mkd 0750 commypanel commypanel "$(p "$DATA_DIR/storage/$sub")"
+    done
+    mkd 0750 root commypanel "$(p "$CONF_DIR")"
+    mkd 0700 root root "$(p "$CONF_DIR/tls")"
+    mkd 0755 root root "$(p "$NGINX_DIR/commypanel")"
+    mkd 0755 root root "$(p "$PREFIX/releases")"
+}
+
+# ------------------------------------------------------------------ settings
+
+detect_address() {
+    SERVER_ADDR="${COMMYPANEL_ADDRESS:-}"
+    if [ -z "$SERVER_ADDR" ] && command -v ip >/dev/null 2>&1; then
+        SERVER_ADDR="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}' || true)"
+    fi
+    if [ -z "$SERVER_ADDR" ] && command -v hostname >/dev/null 2>&1; then
+        SERVER_ADDR="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+    fi
+    if [ -z "$SERVER_ADDR" ]; then SERVER_ADDR=localhost; fi
+}
+
+write_env() {
+    local env_file
+    env_file="$(p "$CONF_DIR/env")"
+
+    if [ -f "$env_file" ]; then
+        # Existing installation: keep every value, add any setting a newer release needs.
+        local key line
+        for line in \
+            "COMMYPANEL_DATA_PATH=$DATA_DIR" \
+            "LARAVEL_STORAGE_PATH=$DATA_DIR/storage" \
+            "HOST_DRIVER=agent" \
+            "AGENT_SOCKET=/run/commypanel/agent.sock"; do
+            key="${line%%=*}"
+            if ! grep -q "^$key=" "$env_file"; then printf '%s\n' "$line" >> "$env_file"; fi
+        done
+        return 0
+    fi
+
+    APP_KEY="base64:$(openssl rand -base64 32)"
+    APP_URL="https://$SERVER_ADDR:$PANEL_PORT"
+    render "$TEMPLATES/env.template" "$env_file" 0640
+    if [ "$SYSTEM" = 1 ]; then chown root:commypanel "$env_file"; fi
+    unset APP_KEY
+}
+
+ensure_panel_certificate() {
+    local dir
+    dir="$(p "$CONF_DIR/tls")"
+    if [ -f "$dir/panel.crt" ] && [ -f "$dir/panel.key" ]; then return 0; fi
+
+    if [ "$SYSTEM" != 1 ]; then
+        : > "$dir/panel.crt"
+        : > "$dir/panel.key"
+        return 0
+    fi
+
+    log "Creating a self-signed certificate for the panel (replaced once you add a panel domain)"
+    local san
+    if printf '%s' "$SERVER_ADDR" | grep -Eq '^[0-9]+(\.[0-9]+){3}$'; then
+        san="IP:$SERVER_ADDR,DNS:localhost"
+    else
+        san="DNS:$SERVER_ADDR,DNS:localhost"
+    fi
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+        -subj "/CN=CommyPanel" -addext "subjectAltName=$san" \
+        -keyout "$dir/panel.key" -out "$dir/panel.crt" 2>/dev/null
+    chmod 0600 "$dir/panel.key"
+}
+
+# ------------------------------------------------------------------ release
+
+prepare_release() {
+    if [ "$SYSTEM" != 1 ]; then return 0; fi
+
+    log "Preparing release $VERSION"
+    chown -R root:root "$RELEASE_DIR"
+    chmod -R go-w "$RELEASE_DIR"
+
+    # The code stays read-only for the panel user; only these paths are writable.
+    # The bootstrap cache is per release: a rollback must never see the caches of a newer version.
+    install -d -m 0750 -o commypanel -g commypanel "$DATA_DIR/bootstrap-cache/$VERSION"
+    rm -rf "${RELEASE_DIR:?}/storage" "${RELEASE_DIR:?}/bootstrap/cache"
+    ln -sfn "$DATA_DIR/storage" "$RELEASE_DIR/storage"
+    ln -sfn "$DATA_DIR/bootstrap-cache/$VERSION" "$RELEASE_DIR/bootstrap/cache"
+    ln -sfn "$CONF_DIR/env" "$RELEASE_DIR/.env"
+
+    local binary="$RELEASE_DIR/bin/commypanel-agent-linux-$ARCH"
+    [ -f "$binary" ] || die "This release has no agent for $ARCH."
+    cp "$binary" "$RELEASE_DIR/bin/commypanel-agent"
+    chmod 0755 "$RELEASE_DIR/bin/commypanel-agent"
+    rm -f "$RELEASE_DIR"/bin/commypanel-agent-linux-*
+}
+
+backup_databases() {
+    if [ "$SYSTEM" != 1 ] || [ "$UPGRADE" = 0 ]; then return 0; fi
+    if ! ls "$DATA_DIR"/db/*.sqlite >/dev/null 2>&1; then return 0; fi
+
+    local stamp dest file
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    dest="$DATA_DIR/backups/$stamp"
+    log "Backing up the panel databases to $dest"
+    install -d -m 0700 -o commypanel -g commypanel "$DATA_DIR/backups" "$dest"
+    for file in "$DATA_DIR"/db/*.sqlite; do
+        runuser -u commypanel -- sqlite3 "$file" ".backup '$dest/$(basename "$file")'"
+    done
+
+    # Keep the five newest backups.
+    ls -1dt "$DATA_DIR"/backups/*/ 2>/dev/null | tail -n +6 | while IFS= read -r old; do
+        rm -rf "${old:?}"
+    done
+}
+
+migrate_and_cache() {
+    if [ "$SYSTEM" != 1 ]; then return 0; fi
+
+    log "Migrating the panel databases"
+    as_panel commypanel:migrate --force
+    log "Caching configuration"
+    as_panel optimize:clear >/dev/null
+    as_panel optimize >/dev/null
+}
+
+# --------------------------------------------------------------- system config
+
+# install_managed SRC DEST MODE: render a template, keeping a backup of what it replaces.
+install_managed() {
+    local src=$1 dest=$2 mode=$3
+    if [ -f "$dest" ] && [ "$SYSTEM" = 1 ]; then cp -p "$dest" "$dest.commypanel-backup"; fi
+    render "$src" "$dest" "$mode"
+}
+
+restore_managed() {
+    local dest=$1
+    if [ -f "$dest.commypanel-backup" ]; then
+        mv "$dest.commypanel-backup" "$dest"
+    else
+        rm -f "$dest"
+    fi
+}
+
+install_system_config() {
+    log "Writing service and web server configuration"
+
+    local unit_dir
+    unit_dir="$(p /etc/systemd/system)"
+    install_managed "$TEMPLATES/commypanel-agent.service" "$unit_dir/commypanel-agent.service" 0644
+    install_managed "$TEMPLATES/commypanel-queue@.service" "$unit_dir/commypanel-queue@.service" 0644
+    install_managed "$TEMPLATES/commypanel-scheduler.service" "$unit_dir/commypanel-scheduler.service" 0644
+
+    local nginx_include nginx_panel fpm_pool
+    nginx_include="$(p "$NGINX_DIR/conf.d/00-commypanel.conf")"
+    nginx_panel="$(p "$NGINX_DIR/conf.d/10-commypanel-panel.conf")"
+    fpm_pool="$(p "/etc/php/$PHP_VER/fpm/pool.d/commypanel.conf")"
+
+    if [ "$SYSTEM" = 1 ] && ! grep -Rqs 'conf.d/\*.conf' "$NGINX_DIR/nginx.conf"; then
+        die "nginx.conf does not include conf.d/*.conf, so CommyPanel cannot add its sites. Please add that include to the http block and run the installer again."
+    fi
+
+    install_managed "$TEMPLATES/nginx-include.conf" "$nginx_include" 0644
+    install_managed "$TEMPLATES/nginx-panel.conf" "$nginx_panel" 0644
+    install_managed "$TEMPLATES/php-fpm-pool.conf" "$fpm_pool" 0644
+
+    # Our catch-all port-80 site (installed by the agent) would clash with the distribution's default site.
+    if [ "$SYSTEM" = 1 ] && [ -e "$NGINX_DIR/sites-enabled/default" ]; then
+        log "Disabling nginx's default site (CommyPanel serves its own)"
+        rm -f "$NGINX_DIR/sites-enabled/default"
+    fi
+
+    if [ "$SYSTEM" = 1 ]; then
+        if ! "php-fpm$PHP_VER" -t >/dev/null 2>&1; then
+            restore_managed "$fpm_pool"
+            die "The PHP-FPM configuration is invalid (php-fpm$PHP_VER -t failed); the change was undone."
+        fi
+        if ! nginx -t >/dev/null 2>&1; then
+            nginx -t || true
+            restore_managed "$nginx_panel"
+            restore_managed "$nginx_include"
+            die "nginx rejected the configuration (shown above); the change was undone."
+        fi
+    fi
+
+    render "$TEMPLATES/commypanel-cli" "$(p /usr/local/bin/commypanel)" 0755
+    sys systemctl daemon-reload
+}
+
+switch_release() {
+    if [ "$SYSTEM" != 1 ]; then return 0; fi
+    ln -sfn "$RELEASE_DIR" "$PREFIX/current.new"
+    mv -T "$PREFIX/current.new" "$PREFIX/current"
+}
+
+SERVICES="commypanel-agent commypanel-queue@1 commypanel-queue@2 commypanel-scheduler"
+
+start_services() {
+    if [ "$SYSTEM" != 1 ]; then return 0; fi
+
+    log "Starting services"
+    if [ "$SKIP_DOCKER" = 0 ]; then systemctl enable --now docker; fi
+    systemctl enable --now nginx "php$PHP_VER-fpm"
+    systemctl reload "php$PHP_VER-fpm"
+    systemctl reload nginx
+    # shellcheck disable=SC2086
+    systemctl enable $SERVICES >/dev/null 2>&1
+    # shellcheck disable=SC2086
+    systemctl restart $SERVICES
+}
+
+wait_until_healthy() {
+    if [ "$SYSTEM" != 1 ]; then return 0; fi
+    local waited=0
+    while [ "$waited" -lt 45 ]; do
+        if [ -S /run/commypanel/agent.sock ] \
+            && [ "$(curl -sk -o /dev/null -w '%{http_code}' "https://127.0.0.1:$PANEL_PORT/up" 2>/dev/null || true)" = "200" ]; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
+rollback() {
+    local previous=$1
+    warn "The new version did not start. Going back to the previous release."
+    ln -sfn "$previous" "$PREFIX/current.new"
+    mv -T "$PREFIX/current.new" "$PREFIX/current"
+    # shellcheck disable=SC2086
+    systemctl restart $SERVICES || true
+    journalctl -u commypanel-agent -n 20 --no-pager >&2 || true
+    die "Upgrade to $VERSION failed and $(basename "$previous") is running again. Database changes from the new release were kept; backups are in $DATA_DIR/backups."
+}
+
+prune_releases() {
+    if [ "$SYSTEM" != 1 ]; then return 0; fi
+    local current previous keep
+    current="$(readlink -f "$PREFIX/current")"
+    previous="${PREVIOUS_RELEASE:-}"
+    ls -1dt "$PREFIX"/releases/*/ 2>/dev/null | tail -n +4 | while IFS= read -r dir; do
+        dir="${dir%/}"
+        keep=0
+        if [ "$dir" = "$current" ] || [ "$dir" = "$previous" ]; then keep=1; fi
+        if [ "$keep" = 0 ]; then
+            rm -rf "${dir:?}" "${DATA_DIR:?}/bootstrap-cache/$(basename "$dir")"
+        fi
+    done
+}
+
+# ---------------------------------------------------------------------- main
+
+main() {
+    if [ "$SYSTEM" = 1 ]; then
+        mkdir -p "$(dirname "$LOG_FILE")"
+        exec > >(tee -a "$LOG_FILE") 2>&1
+    fi
+
+    VERSION="$(cat "$RELEASE_DIR/VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [ -z "$VERSION" ] && [ "$SYSTEM" != 1 ]; then VERSION="0.0.0-dev"; fi
+    [ -n "$VERSION" ] || die "This release has no VERSION file."
+
+    # An existing environment file means CommyPanel is already installed here.
+    UPGRADE=0
+    if [ -f "$(p "$CONF_DIR/env")" ]; then UPGRADE=1; fi
+    if [ "$UPGRADE_FLAG" = 1 ] && [ "$UPGRADE" = 0 ] && [ "$SYSTEM" = 1 ]; then
+        die "There is no existing installation to upgrade. Run the installer without --upgrade."
+    fi
+    if [ "$UPGRADE" = 1 ]; then
+        stored_port="$(conf_get PANEL_PORT)"
+        if [ -n "$stored_port" ]; then PANEL_PORT="$stored_port"; fi
+        log "Upgrading CommyPanel to $VERSION"
+    else
+        log "Installing CommyPanel $VERSION"
+    fi
+
+    preflight
+    install_packages
+    detect_php
+
+    PREVIOUS_RELEASE=""
+    if [ "$SYSTEM" = 1 ] && [ -L "$PREFIX/current" ]; then PREVIOUS_RELEASE="$(readlink -f "$PREFIX/current")"; fi
+
+    create_user_and_dirs
+    detect_address
+    if [ "$UPGRADE" = 1 ]; then
+        stored_addr="$(conf_get SERVER_ADDR)"
+        if [ -n "$stored_addr" ]; then SERVER_ADDR="$stored_addr"; fi
+    fi
+    write_env
+    conf_set PANEL_PORT "$PANEL_PORT"
+    conf_set SERVER_ADDR "$SERVER_ADDR"
+    ensure_panel_certificate
+    prepare_release
+    backup_databases
+    migrate_and_cache
+    install_system_config
+
+    if [ "$UPGRADE" = 0 ]; then
+        # First install: there is nothing to roll back to, so go live now.
+        switch_release
+        start_services
+        wait_until_healthy || die "The panel did not become healthy. Check: systemctl status commypanel-agent nginx php$PHP_VER-fpm"
+    else
+        switch_release
+        start_services
+        if ! wait_until_healthy; then rollback "${PREVIOUS_RELEASE:-$RELEASE_DIR}"; fi
+    fi
+    prune_releases
+
+    if [ "$SYSTEM" != 1 ]; then
+        log "Rendered configuration below ${ROOT:-/}"
+        return 0
+    fi
+
+    if [ "$UPGRADE" = 1 ]; then
+        log "CommyPanel is now version $VERSION."
+        return 0
+    fi
+
+    local url
+    url="$(as_panel commypanel:setup-url 2>/dev/null | grep -Eo 'https?://[^[:space:]]+' | head -n 1 || true)"
+    printf '\n'
+    printf '\033[1;32mCommyPanel %s is installed.\033[0m\n\n' "$VERSION"
+    printf '  Create your admin account (works once, expires in 1 hour):\n\n    %s\n\n' "${url:-run: sudo commypanel setup-url}"
+    printf '  Your browser will warn about the panel certificate: it is self-signed until you add a panel domain.\n\n'
+    printf '  Open these ports in your firewall: 80, 443 and %s.\n' "$PANEL_PORT"
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
+        printf '  ufw is active here, so run:  sudo ufw allow 80,443,%s/tcp\n' "$PANEL_PORT"
+    fi
+    printf '\n  Manage the panel:  sudo commypanel help\n\n'
+}
+
+main

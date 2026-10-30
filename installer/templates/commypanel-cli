@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# CommyPanel command line. Managed by CommyPanel. Run it as root (use sudo).
+set -Eeuo pipefail
+
+PREFIX="@@PREFIX@@"
+DATA_DIR="@@DATA_DIR@@"
+CONF_DIR="@@CONF_DIR@@"
+PHP_BIN="@@PHP_BIN@@"
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+require_root() {
+    [ "$(id -u)" -eq 0 ] || die "Run this as root, for example: sudo commypanel $*"
+}
+
+artisan() {
+    [ -d "$PREFIX/current" ] || die "CommyPanel does not seem to be installed ($PREFIX/current is missing)."
+    cd "$PREFIX/current"
+    exec runuser -u commypanel -- env LARAVEL_STORAGE_PATH="$DATA_DIR/storage" "$PHP_BIN" artisan "$@"
+}
+
+usage() {
+    cat <<'USAGE'
+CommyPanel
+
+Usage: sudo commypanel <command>
+
+  setup-url            Print a one-time link to create the first admin account
+  admin:reset EMAIL    Set a new random password for an admin and switch off its 2FA
+  status               Show the version, services and panel address
+  logs                 Follow the logs of all CommyPanel services
+  upgrade [--version X]  Upgrade to the latest (or a given) release
+  version              Print the installed version
+  artisan ...          Run a panel console command (advanced)
+USAGE
+}
+
+command="${1:-help}"
+[ "$#" -gt 0 ] && shift
+
+case "$command" in
+    setup-url)
+        require_root setup-url
+        artisan commypanel:setup-url
+        ;;
+    admin:reset)
+        require_root admin:reset "$@"
+        [ "$#" -ge 1 ] || die "Usage: sudo commypanel admin:reset EMAIL"
+        artisan admin:reset "$1"
+        ;;
+    status)
+        printf 'Version: %s\n' "$(cat "$PREFIX/current/VERSION" 2>/dev/null || echo unknown)"
+        printf 'Panel:   %s\n' "$(grep '^APP_URL=' "$CONF_DIR/env" 2>/dev/null | cut -d= -f2- || echo unknown)"
+        for unit in commypanel-agent commypanel-queue@1 commypanel-queue@2 commypanel-scheduler nginx docker; do
+            printf '%-22s %s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || true)"
+        done
+        ;;
+    logs)
+        require_root logs
+        exec journalctl -f -u commypanel-agent -u 'commypanel-queue@*' -u commypanel-scheduler
+        ;;
+    upgrade)
+        require_root upgrade "$@"
+        exec "$PREFIX/current/installer/install.sh" --upgrade "$@"
+        ;;
+    version)
+        cat "$PREFIX/current/VERSION"
+        ;;
+    artisan)
+        require_root artisan "$@"
+        artisan "$@"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 1
+        ;;
+esac

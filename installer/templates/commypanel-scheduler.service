@@ -1,0 +1,25 @@
+[Unit]
+Description=CommyPanel scheduler (domain checks, certificate renewals)
+After=network.target
+
+[Service]
+Type=simple
+User=commypanel
+Group=commypanel
+WorkingDirectory=@@PREFIX@@/current
+Environment=LARAVEL_STORAGE_PATH=@@DATA_DIR@@/storage
+ExecStart=@@PHP_BIN@@ artisan schedule:work
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=@@DATA_DIR@@
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

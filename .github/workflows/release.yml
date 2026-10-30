@@ -1,0 +1,50 @@
+name: release
+
+# Builds the release tarball when a version tag is pushed and publishes it,
+# with its checksum and the one-line installer, as a GitHub release.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Run the tests
+        run: |
+          composer setup
+          composer ci:check
+          cd agent && go vet ./... && go test ./...
+
+      - name: Build the release
+        run: scripts/build-release.sh "${GITHUB_REF_NAME#v}" dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/commypanel.tar.gz dist/commypanel.tar.gz.sha256 dist/install.sh \
+            --generate-notes --verify-tag

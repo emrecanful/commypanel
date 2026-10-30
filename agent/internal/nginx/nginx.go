@@ -10,8 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"text/template"
+	"time"
 
 	"commypanel/agent/internal/validate"
 )
@@ -67,6 +71,9 @@ type Config struct {
 type Manager struct {
 	cfg Config
 	run Runner
+
+	http2Once   sync.Once
+	http2Modern bool
 }
 
 func NewManager(cfg Config, run Runner) *Manager {
@@ -92,10 +99,10 @@ server {
 }
 
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-    server_name {{.ServerNames}};
+    listen 443 ssl{{if not .ModernHTTP2}} http2{{end}};
+    listen [::]:443 ssl{{if not .ModernHTTP2}} http2{{end}};
+{{if .ModernHTTP2}}    http2 on;
+{{end}}    server_name {{.ServerNames}};
 
     ssl_certificate {{.CertDir}}/fullchain.pem;
     ssl_certificate_key {{.CertDir}}/privkey.pem;
@@ -164,10 +171,14 @@ func (m *Manager) Render(s Site) (string, error) {
 	data := struct {
 		ServerNames, Webroot, CertDir string
 		Port                          int
+		ModernHTTP2                   bool
 	}{
 		ServerNames: strings.Join(s.Domains, " "),
 		Webroot:     filepath.Join(m.cfg.DataDir, "acme-webroot"),
 		Port:        s.UpstreamPort,
+	}
+	if s.Certificate != "" {
+		data.ModernHTTP2 = m.modernHTTP2() // only HTTPS sites use HTTP/2
 	}
 	if s.Certificate != "" {
 		data.CertDir = filepath.Join(m.cfg.DataDir, "certs", s.Certificate)
@@ -177,6 +188,44 @@ func (m *Manager) Render(s Site) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+var nginxVersionRe = regexp.MustCompile(`nginx/(\d+)\.(\d+)\.(\d+)`)
+
+// modernHTTP2 reports whether the installed nginx understands the standalone
+// `http2 on;` directive (1.25.1 and later). Older versions, and any case where
+// the version cannot be read, get `listen ... ssl http2;`, which every version
+// accepts (newer ones only warn that it is deprecated).
+func (m *Manager) modernHTTP2() bool {
+	m.http2Once.Do(func() {
+		if m.cfg.DryRun {
+			m.http2Modern = true
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		out, _ := m.run.Run(ctx, "nginx", "-v")
+		m.http2Modern = versionAtLeast(string(out), 1, 25, 1)
+	})
+	return m.http2Modern
+}
+
+func versionAtLeast(output string, major, minor, patch int) bool {
+	match := nginxVersionRe.FindStringSubmatch(output)
+	if match == nil {
+		return false
+	}
+	have := [3]int{}
+	for i := range have {
+		have[i], _ = strconv.Atoi(match[i+1])
+	}
+	want := [3]int{major, minor, patch}
+	for i := range have {
+		if have[i] != want[i] {
+			return have[i] > want[i]
+		}
+	}
+	return true
 }
 
 func (m *Manager) path(name string) string {

@@ -12,13 +12,17 @@ import (
 )
 
 type fakeRunner struct {
-	calls  []string
-	failOn string // "test" or "reload"
+	calls   []string
+	failOn  string // "test" or "reload"
+	version string // output of `nginx -v`
 }
 
 func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
+	if call == "nginx -v" {
+		return []byte(f.version), nil
+	}
 	if f.failOn == "test" && strings.HasSuffix(call, "-t") {
 		return []byte("bad config"), errors.New("exit 1")
 	}
@@ -232,5 +236,71 @@ func TestEnsureDefaultSiteInDryRun(t *testing.T) {
 	}
 	if len(run.calls) != 0 {
 		t.Errorf("dry run executed %v", run.calls)
+	}
+}
+
+func TestHTTP2SyntaxFollowsTheNginxVersion(t *testing.T) {
+	cases := map[string]struct{ modern bool }{
+		"nginx version: nginx/1.24.0 (Ubuntu)": {false},
+		"nginx version: nginx/1.25.0":          {false},
+		"nginx version: nginx/1.25.1":          {true},
+		"nginx version: nginx/1.26.3":          {true},
+		"nginx version: nginx/1.30.0":          {true},
+		"nginx version: nginx/2.0.0":           {true},
+		"nginx version: nginx/1.9.15":          {false},
+		"something unexpected":                 {false},
+		"":                                     {false},
+	}
+	for output, want := range cases {
+		m, _ := newManager(t, &fakeRunner{version: output}, false)
+		s := site
+		s.Certificate = "demo"
+		conf, err := m.Render(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hasDirective := strings.Contains(conf, "    http2 on;")
+		hasListenFlag := strings.Contains(conf, "listen 443 ssl http2;") && strings.Contains(conf, "listen [::]:443 ssl http2;")
+		if want.modern && (!hasDirective || hasListenFlag) {
+			t.Errorf("%q: want `http2 on;` only:\n%s", output, conf)
+		}
+		if !want.modern && (hasDirective || !hasListenFlag) {
+			t.Errorf("%q: want `ssl http2` listen flags only:\n%s", output, conf)
+		}
+	}
+}
+
+func TestHTTP2IsDetectedOnlyOnce(t *testing.T) {
+	run := &fakeRunner{version: "nginx version: nginx/1.26.0"}
+	m, _ := newManager(t, run, false)
+	s := site
+	s.Certificate = "demo"
+	for i := 0; i < 3; i++ {
+		if _, err := m.Render(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := 0
+	for _, c := range run.calls {
+		if c == "nginx -v" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("nginx -v ran %d times, want 1", count)
+	}
+}
+
+func TestDryRunNeverAsksNginxForItsVersion(t *testing.T) {
+	run := &fakeRunner{}
+	m, _ := newManager(t, run, true)
+	s := site
+	s.Certificate = "demo"
+	conf, err := m.Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.calls) != 0 || !strings.Contains(conf, "http2 on;") {
+		t.Errorf("calls=%v conf=%s", run.calls, conf)
 	}
 }
