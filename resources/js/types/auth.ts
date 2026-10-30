@@ -9,6 +9,12 @@ export type User = {
     [key: string]: unknown; // This allows for additional properties...
 };
 
+export type TwoFactorState = {
+    enabled: boolean;
+    pending: boolean;
+};
+
 export type Auth = {
     user: User;
+    twoFactor: TwoFactorState;
 };

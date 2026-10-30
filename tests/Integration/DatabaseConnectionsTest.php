@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
@@ -40,4 +42,27 @@ it('points queue, cache and sessions at their own connections', function () {
         ->and(config('queue.failed.database'))->toBe('queue')
         ->and(config('cache.stores.database.connection'))->toBe('cache')
         ->and(config('session.connection'))->toBe('cache');
+});
+
+it('tells the user to run commypanel:migrate when a database file is missing', function () {
+    config([
+        'app.debug' => true,
+        'database.connections.cache.database' => storage_path('framework/testing/missing-'.uniqid().'.sqlite'),
+    ]);
+    DB::purge('cache');
+
+    try {
+        DB::connection('cache')->select('select 1');
+    } catch (Throwable $e) {
+        $request = Request::create('/', 'GET', server: ['HTTP_ACCEPT' => 'application/json']);
+        $response = app(ExceptionHandler::class)->render($request, $e);
+
+        expect($response->getContent())->toContain('php artisan commypanel:migrate');
+
+        return;
+    } finally {
+        DB::purge('cache');
+    }
+
+    $this->fail('Expected a query exception for the missing database file.');
 });

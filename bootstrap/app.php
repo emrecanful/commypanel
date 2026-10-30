@@ -1,6 +1,9 @@
 <?php
 
+use App\Exceptions\PanelNotMigrated;
 use App\Http\Middleware\HandleInertiaRequests;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\SQLiteDatabaseDoesNotExistException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -20,6 +23,11 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->map(fn (SQLiteDatabaseDoesNotExistException $e) => new PanelNotMigrated($e));
+        $exceptions->map(fn (QueryException $e) => $e->getPrevious() instanceof SQLiteDatabaseDoesNotExistException
+            ? new PanelNotMigrated($e)
+            : $e);
+
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );

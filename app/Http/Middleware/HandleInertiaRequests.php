@@ -40,6 +40,12 @@ class HandleInertiaRequests extends Middleware
             'name' => config('app.name'),
             'auth' => [
                 'user' => $request->user(),
+                'twoFactor' => [
+                    'enabled' => $request->user()?->two_factor_confirmed_at !== null,
+                    'pending' => $request->user() !== null
+                        && $request->user()->two_factor_secret !== null
+                        && $request->user()->two_factor_confirmed_at === null,
+                ],
             ],
         ];
     }
