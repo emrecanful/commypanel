@@ -125,12 +125,13 @@ func TestRemoveSite(t *testing.T) {
 }
 
 type fakeDocker struct {
-	ran       []docker.ContainerSpec
-	stopped   []string
-	removed   []string
-	err       error
-	buildErr  error
-	buildLogs []string
+	ran           []docker.ContainerSpec
+	stopped       []string
+	removed       []string
+	err           error
+	buildErr      error
+	buildLogs     []string
+	removedImages []string
 }
 
 func (f *fakeDocker) Run(_ context.Context, s docker.ContainerSpec) error {
@@ -170,6 +171,13 @@ func (f *fakeDocker) Build(_ context.Context, _ docker.BuildSpec, onLine func(st
 	return f.buildErr
 }
 func (f *fakeDocker) PruneImages(context.Context) (uint64, error) { return 99, f.err }
+func (f *fakeDocker) RemoveImage(_ context.Context, tag string) error {
+	if !strings.HasPrefix(tag, "commypanel/") {
+		return &validate.InputError{Msg: "only commypanel/ images can be removed"}
+	}
+	f.removedImages = append(f.removedImages, tag)
+	return f.err
+}
 
 func newDockerServer(f *fakeDocker) *Server {
 	return New(Options{Nginx: &fakeNginx{}, Docker: f, Authorize: AllowAll()})
@@ -249,5 +257,16 @@ func TestBuildFailureAndValidation(t *testing.T) {
 	rec = do(t, newDockerServer(&fakeDocker{}), "POST", "/v1/docker/images/build", `{"tag":"library/alpine","context_path":"/x"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid build: code = %d, want 400", rec.Code)
+	}
+}
+
+func TestRemoveImageRoute(t *testing.T) {
+	f := &fakeDocker{}
+	s := newDockerServer(f)
+	if rec := do(t, s, "POST", "/v1/docker/images/remove", `{"tag":"commypanel/demo:1"}`); rec.Code != 200 || f.removedImages[0] != "commypanel/demo:1" {
+		t.Errorf("remove: %d %v", rec.Code, f.removedImages)
+	}
+	if rec := do(t, s, "POST", "/v1/docker/images/remove", `{"tag":"library/alpine"}`); rec.Code != 400 {
+		t.Errorf("foreign image: %d, want 400", rec.Code)
 	}
 }

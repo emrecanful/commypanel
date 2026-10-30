@@ -348,3 +348,18 @@ func TestBuildNeedsADockerfile(t *testing.T) {
 		t.Errorf("want *InputError, got %v", err)
 	}
 }
+
+func TestRemoveImage(t *testing.T) {
+	m, d, _ := setup(t)
+	if err := m.RemoveImage(context.Background(), "commypanel/demo:1"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.has("DELETE /images/commypanel/demo:1") {
+		t.Errorf("requests = %v", d.requests)
+	}
+	for _, tag := range []string{"library/alpine:3", "commypanel/Bad Tag", "mariadb"} {
+		if err := m.RemoveImage(context.Background(), tag); err == nil {
+			t.Errorf("%q must be rejected", tag)
+		}
+	}
+}

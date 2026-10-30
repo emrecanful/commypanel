@@ -74,4 +74,12 @@ interface HostDriver
      * @throws HostOperationFailed
      */
     public function pruneDanglingImages(): int;
+
+    /**
+     * Remove one of CommyPanel's own images (tags under commypanel/). A
+     * missing image is not an error.
+     *
+     * @throws HostOperationFailed
+     */
+    public function removeImage(string $tag): void;
 }

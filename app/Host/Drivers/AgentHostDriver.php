@@ -127,6 +127,11 @@ class AgentHostDriver implements HostDriver
         $this->send('delete', "/v1/docker/containers/{$name}");
     }
 
+    public function removeImage(string $tag): void
+    {
+        $this->send('post', '/v1/docker/images/remove', ['tag' => $tag]);
+    }
+
     public function listContainers(): array
     {
         $data = $this->send('get', '/v1/docker/containers');

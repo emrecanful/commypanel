@@ -35,6 +35,7 @@ type Docker interface {
 	ValidateBuild(s docker.BuildSpec) error
 	Build(ctx context.Context, s docker.BuildSpec, onLine func(string)) error
 	PruneImages(ctx context.Context) (uint64, error)
+	RemoveImage(ctx context.Context, tag string) error
 }
 
 // Authorizer decides whether the caller of a request may use the agent.
@@ -66,6 +67,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/docker/containers/{name}/logs", s.containerLogs)
 	mux.HandleFunc("POST /v1/docker/images/build", s.buildImage)
 	mux.HandleFunc("POST /v1/docker/images/prune", s.pruneImages)
+	mux.HandleFunc("POST /v1/docker/images/remove", s.removeImage)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.opts.Authorize == nil || !s.opts.Authorize(r) {
@@ -170,6 +172,16 @@ func (s *Server) containerLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"logs": out})
+}
+
+func (s *Server) removeImage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Tag string `json:"tag"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	s.respond(w, s.opts.Docker.RemoveImage(r.Context(), body.Tag))
 }
 
 func (s *Server) pruneImages(w http.ResponseWriter, r *http.Request) {

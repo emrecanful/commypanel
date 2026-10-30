@@ -394,3 +394,23 @@ func (m *Manager) PruneImages(ctx context.Context) (uint64, error) {
 	}
 	return out.SpaceReclaimed, nil
 }
+
+// RemoveImage deletes one of the images the agent builds. Only tags in the
+// commypanel/ namespace are accepted; a missing image is not an error.
+func (m *Manager) RemoveImage(ctx context.Context, tag string) error {
+	if !strings.HasPrefix(tag, buildNamePrefix) {
+		return &validate.InputError{Msg: "only " + buildNamePrefix + " images can be removed"}
+	}
+	if err := validate.Image(tag); err != nil {
+		return err
+	}
+	if m.cfg.DryRun {
+		slog.Info("dry-run: would remove image", "tag", tag)
+		return nil
+	}
+	err := m.engine.doJSON(ctx, "DELETE", "/images/"+tag, url.Values{"force": {"false"}}, nil, nil)
+	if isStatus(err, 404) {
+		return nil
+	}
+	return err
+}

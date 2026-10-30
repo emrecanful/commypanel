@@ -74,6 +74,11 @@ class FakeHostDriver implements HostDriver
         unset($this->containers[$name]);
     }
 
+    public function removeImage(string $tag): void
+    {
+        $this->record('removeImage', ['tag' => $tag]);
+    }
+
     public function listContainers(): array
     {
         return array_values(array_map(

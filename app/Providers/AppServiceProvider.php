@@ -4,6 +4,12 @@ namespace App\Providers;
 
 use App\Audit\AuditEventSubscriber;
 use App\Audit\AuditLogger;
+use App\Deploy\Health\HealthChecker;
+use App\Deploy\Health\HttpHealthChecker;
+use App\Deploy\Source\GitSourceFetcher;
+use App\Deploy\Source\SourceFetcher;
+use App\Deploy\Traffic\NullTrafficSwitcher;
+use App\Deploy\Traffic\TrafficSwitcher;
 use App\Host\Drivers\AgentHostDriver;
 use App\Host\Drivers\FakeHostDriver;
 use App\Host\HostDriver;
@@ -23,6 +29,9 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(AuditLogger::class);
+        $this->app->bind(SourceFetcher::class, GitSourceFetcher::class);
+        $this->app->bind(HealthChecker::class, HttpHealthChecker::class);
+        $this->app->bind(TrafficSwitcher::class, NullTrafficSwitcher::class);
 
         $this->app->singleton(HostDriver::class, fn (): HostDriver => match (config('commypanel.host_driver')) {
             'fake' => new FakeHostDriver,
