@@ -17,6 +17,12 @@ type Props = {
 
 const POLL_MS = 1500;
 
+function waitingText(status: DeploymentDetail['status']): string {
+    return status === 'queued'
+        ? 'Waiting for a worker to pick this up...'
+        : 'Working. Output appears here as soon as there is some...';
+}
+
 export default function Deployment({ app, deployment }: Props) {
     const logRef = useRef<HTMLPreElement>(null);
 
@@ -76,8 +82,7 @@ export default function Deployment({ app, deployment }: Props) {
                             aria-live="polite"
                             className="max-h-[36rem] min-h-48 w-full overflow-auto rounded-field border border-base-300 bg-base-200 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap"
                         >
-                            {deployment.log ||
-                                'Waiting for the worker to pick this up...'}
+                            {deployment.log || waitingText(deployment.status)}
                         </pre>
                     </Card>
                 </div>

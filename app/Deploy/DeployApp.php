@@ -54,7 +54,7 @@ class DeployApp
                 $workDir = $this->workDir($app, $deployment);
                 $this->build($app, $deployment, $workDir, $log);
             } else {
-                $log->line("Rolling back to release {$deployment->image_tag}.");
+                $log->step("Rolling back to release {$deployment->image_tag}.");
             }
 
             $deployment->forceFill(['status' => DeploymentStatus::Starting])->save();
@@ -62,7 +62,7 @@ class DeployApp
             $this->checkHealth($app, $deployment, $log);
 
             $previous = $app->activeDeployment;
-            $log->line('Switching traffic to the new version.');
+            $log->step('Switching traffic to the new version.');
             $this->traffic->switchTo($deployment);
             $app->forceFill(['active_deployment_id' => $deployment->id])->save();
             $deployment->forceFill(['status' => DeploymentStatus::Active, 'finished_at' => now()])->save();
@@ -96,10 +96,10 @@ class DeployApp
 
     private function build(App $app, Deployment $deployment, string $workDir, DeployLogger $log): void
     {
-        $log->line("Fetching {$app->git_url} ({$app->git_branch}).");
+        $log->step("Fetching {$app->git_url} ({$app->git_branch}).");
         $sha = $this->source->fetch($app, $workDir);
         $deployment->forceFill(['commit_sha' => $sha])->save();
-        $log->line("Commit {$sha}.");
+        $log->step("Commit {$sha}.");
 
         try {
             $plan = $this->detector->plan($workDir, $app->container_port);
@@ -126,7 +126,7 @@ class DeployApp
 
         $tag = "commypanel/{$app->slug}:{$deployment->number}";
         $deployment->forceFill(['image_tag' => $tag])->save();
-        $log->line("Building image {$tag}.");
+        $log->step("Building image {$tag}.");
 
         $this->host->buildImage(new ImageBuildSpec($tag, $workDir, $dockerfile), $log->line(...));
     }
@@ -137,7 +137,7 @@ class DeployApp
         $name = "{$app->slug}-{$deployment->number}";
         $deployment->forceFill(['container_name' => $name])->save();
 
-        $log->line("Starting container {$name} on port {$port}.");
+        $log->step("Starting container {$name} on port {$port}.");
 
         $this->host->runContainer(new ContainerSpec(
             name: $name,
@@ -155,7 +155,7 @@ class DeployApp
     private function checkHealth(App $app, Deployment $deployment, DeployLogger $log): void
     {
         $timeout = (int) config('commypanel.deploy.health_timeout');
-        $log->line("Waiting up to {$timeout}s for {$app->health_path} to answer.");
+        $log->step("Waiting up to {$timeout}s for {$app->health_path} to answer.");
 
         if ($this->health->waitUntilHealthy((int) $deployment->host_port, $app->health_path, $timeout)) {
             $log->line('The new version is healthy.');
@@ -181,7 +181,7 @@ class DeployApp
         }
 
         $drain = (int) config('commypanel.deploy.drain_seconds');
-        $log->line("Stopping the previous version ({$previous->container_name}) in {$drain}s.");
+        $log->step("Stopping the previous version ({$previous->container_name}) in {$drain}s.");
         Sleep::for($drain)->seconds();
 
         try {
