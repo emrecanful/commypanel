@@ -1,6 +1,12 @@
 import type { DomainRow } from './domain';
 
-export type AppStatus = 'setup' | 'new' | 'deploying' | 'running' | 'failed';
+export type AppStatus =
+    | 'setup'
+    | 'new'
+    | 'deploying'
+    | 'running'
+    | 'failed'
+    | 'stopped';
 
 export type AppStack = 'dotnet' | 'go' | 'node';
 
@@ -22,7 +28,6 @@ export type SourceAccess = {
 export type AppSetup = AppSettings & {
     setup_step: SetupStep;
     stack_hint: AppStack | null;
-    source_type: 'git' | 'upload';
     source_verified: boolean;
     has_upload: boolean;
     ssh_url: string | null;
@@ -32,6 +37,7 @@ export type AppSummary = {
     slug: string;
     name: string;
     stack: string | null;
+    source_type: 'git' | 'upload';
     status: AppStatus;
     git_url: string | null;
     git_branch: string;
@@ -45,6 +51,8 @@ export type AppSettings = AppSummary & {
     memory_limit_mb: number | null;
     cpu_limit: number | null;
     deploy_key_public: string | null;
+    stopped_release: number | null;
+    url: string | null;
     domains: DomainRow[];
     certificate: CertificateSummary | null;
 };
@@ -81,6 +89,8 @@ export type DeploymentSummary = {
     stage: DeploymentStage | null;
     finished: boolean;
     commit: string | null;
+    commit_message: string | null;
+    duration_seconds: number | null;
     is_rollback: boolean;
     can_roll_back: boolean;
     error: string | null;

@@ -12,11 +12,17 @@ class CompositeSourceFetcher implements SourceFetcher
         private readonly UploadSourceFetcher $upload,
     ) {}
 
+    private ?SourceFetcher $last = null;
+
+    public function lastCommitMessage(): ?string
+    {
+        return $this->last?->lastCommitMessage();
+    }
+
     public function fetch(App $app, string $destination): string
     {
-        return match ($app->source_type) {
-            SourceType::Upload => $this->upload->fetch($app, $destination),
-            default => $this->git->fetch($app, $destination),
-        };
+        $this->last = $app->source_type === SourceType::Upload ? $this->upload : $this->git;
+
+        return $this->last->fetch($app, $destination);
     }
 }

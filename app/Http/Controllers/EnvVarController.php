@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Audit\AuditLogger;
+use App\Deploy\EnvParser;
 use App\Models\App;
 use App\Models\AppEnvVar;
 use Illuminate\Http\RedirectResponse;
@@ -25,6 +26,28 @@ class EnvVarController extends Controller
         $audit->record('app.env_set', null, ['app' => $app->slug, 'key' => $data['key']], $app);
 
         return back()->with('status', "{$data['key']} saved. It applies from the next deployment.");
+    }
+
+    public function import(Request $request, App $app, EnvParser $parser, AuditLogger $audit): RedirectResponse
+    {
+        $data = $request->validate(['env' => ['required', 'string', 'max:200000']]);
+        $parsed = $parser->parse($data['env']);
+
+        if ($parsed['vars'] === []) {
+            return back()->withErrors(['env' => 'No variables found. Use one KEY=value per line.']);
+        }
+
+        foreach ($parsed['vars'] as $key => $value) {
+            AppEnvVar::query()->updateOrCreate(['app_id' => $app->id, 'key' => $key], ['value' => $value]);
+        }
+
+        $audit->record('app.env_imported', null, ['app' => $app->slug, 'keys' => array_keys($parsed['vars'])], $app);
+
+        $skipped = count($parsed['skipped']);
+        $message = count($parsed['vars']).' variable(s) saved. They apply from the next deployment.'
+            .($skipped > 0 ? " {$skipped} line(s) were skipped." : '');
+
+        return back()->with('status', $message);
     }
 
     public function destroy(App $app, string $key, AuditLogger $audit): RedirectResponse

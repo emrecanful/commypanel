@@ -1,22 +1,27 @@
-import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { Rocket, Trash2 } from 'lucide-react';
+import { Link, router, usePage } from '@inertiajs/react';
+import {
+    ExternalLink,
+    Globe,
+    Layers,
+    Rocket,
+    Settings,
+    SlidersHorizontal,
+    Variable,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
 import AppController from '@/actions/App/Http/Controllers/AppController';
 import DeploymentController from '@/actions/App/Http/Controllers/DeploymentController';
-import { RuntimeFields, SourceFields } from '@/components/apps/app-fields';
-import type { AppFormData } from '@/components/apps/app-fields';
-import { CertificateCard } from '@/components/apps/certificate-card';
-import { DeleteAppModal } from '@/components/apps/delete-app-modal';
-import { AppDomains } from '@/components/apps/app-domains';
-import { DeployKeyCard } from '@/components/apps/deploy-key-card';
-import { DeploymentsCard } from '@/components/apps/deployments-card';
-import { EnvCard } from '@/components/apps/env-card';
+import { AdvancedTab } from '@/components/apps/tabs/advanced-tab';
+import { DeploymentsTab } from '@/components/apps/tabs/deployments-tab';
+import { DomainsTab } from '@/components/apps/tabs/domains-tab';
+import { EnvironmentTab } from '@/components/apps/tabs/environment-tab';
+import { SettingsTab } from '@/components/apps/tabs/settings-tab';
 import { PageHeader } from '@/components/page-header';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
+import { Tabs, tabPanelProps } from '@/components/ui/tabs';
+import type { TabItem } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/app-layout';
 import type { AppSettings, DeploymentSummary, ServerAddress } from '@/types';
 
@@ -28,71 +33,35 @@ type Props = {
     server: ServerAddress;
 };
 
-function Overview({ app }: { app: AppSettings }) {
-    const rows: [string, string][] = [
-        ['Repository', app.git_url ?? '-'],
-        ['Branch', app.git_branch],
-        ['Type', app.stack ?? 'Detected on first deploy'],
-        ['App port', String(app.container_port)],
-        ['Health check', app.health_path],
-        ['Live release', app.active_release ? `#${app.active_release}` : '-'],
-    ];
+type TabId =
+    | 'deployments'
+    | 'domains'
+    | 'environment'
+    | 'settings'
+    | 'advanced';
 
-    return (
-        <Card title="Overview">
-            <dl className="divide-y divide-base-300 text-sm">
-                {rows.map(([label, value]) => (
-                    <div
-                        key={label}
-                        className="flex flex-wrap justify-between gap-x-4 py-2"
-                    >
-                        <dt className="text-base-content/70">{label}</dt>
-                        <dd className="font-medium break-all">{value}</dd>
-                    </div>
-                ))}
-            </dl>
-        </Card>
-    );
+const TAB_IDS: TabId[] = [
+    'deployments',
+    'domains',
+    'environment',
+    'settings',
+    'advanced',
+];
+
+function initialTab(): TabId {
+    try {
+        const tab = new URLSearchParams(window.location.search).get('tab');
+
+        return TAB_IDS.find((id) => id === tab) ?? 'deployments';
+    } catch {
+        return 'deployments';
+    }
 }
 
-function SettingsCard({ app }: { app: AppSettings }) {
-    const form = useForm<AppFormData>({
-        name: app.name,
-        git_url: app.git_url ?? '',
-        git_branch: app.git_branch,
-        container_port: String(app.container_port),
-        health_path: app.health_path,
-        memory_limit_mb: app.memory_limit_mb?.toString() ?? '',
-        cpu_limit: app.cpu_limit?.toString() ?? '',
-    });
-
-    const submit = (event: FormEvent) => {
-        event.preventDefault();
-        form.submit(AppController.update(app.slug), { preserveScroll: true });
-    };
-
-    const fields = {
-        data: form.data,
-        errors: form.errors,
-        setData: form.setData,
-    };
-
-    return (
-        <form onSubmit={submit} className="space-y-6">
-            <Card title="Source" description="Where the code comes from.">
-                <SourceFields {...fields} />
-            </Card>
-            <Card
-                title="Runtime"
-                description="How the app runs. Changes apply from the next deployment."
-            >
-                <RuntimeFields {...fields} />
-            </Card>
-            <Button type="submit" loading={form.processing}>
-                Save settings
-            </Button>
-        </form>
-    );
+function Count({ value }: { value: number }) {
+    return value > 0 ? (
+        <span className="badge-soft badge-neutral badge badge-sm">{value}</span>
+    ) : null;
 }
 
 export default function Show({
@@ -104,6 +73,20 @@ export default function Show({
 }: Props) {
     const { errors } = usePage().props;
     const [deploying, setDeploying] = useState(false);
+    const [tab, setTab] = useState<TabId>(initialTab);
+
+    // Keep the tab in the address so a reload or a shared link lands on it.
+    const select = (id: TabId) => {
+        setTab(id);
+        try {
+            const url = new URL(window.location.href);
+            if (id === 'deployments') url.searchParams.delete('tab');
+            else url.searchParams.set('tab', id);
+            window.history.replaceState(window.history.state, '', url);
+        } catch {
+            // The tab still switches if the address cannot be updated.
+        }
+    };
 
     // While a deployment runs, keep the status and the release list fresh.
     useEffect(() => {
@@ -116,7 +99,6 @@ export default function Show({
 
         return () => clearInterval(timer);
     }, [app.status]);
-    const [confirmDelete, setConfirmDelete] = useState(false);
 
     const deploy = () =>
         router.post(
@@ -128,14 +110,59 @@ export default function Show({
             },
         );
 
+    const tabs: TabItem<TabId>[] = [
+        {
+            id: 'deployments',
+            label: 'Deployments',
+            icon: <Layers className="size-4" aria-hidden />,
+        },
+        {
+            id: 'domains',
+            label: 'Domains & SSL',
+            icon: <Globe className="size-4" aria-hidden />,
+            badge: <Count value={app.domains.length} />,
+        },
+        {
+            id: 'environment',
+            label: 'Environment',
+            icon: <Variable className="size-4" aria-hidden />,
+            badge: <Count value={env_keys.length} />,
+        },
+        {
+            id: 'settings',
+            label: 'Settings',
+            icon: <Settings className="size-4" aria-hidden />,
+        },
+        {
+            id: 'advanced',
+            label: 'Advanced',
+            icon: <SlidersHorizontal className="size-4" aria-hidden />,
+        },
+    ];
+
     return (
         <AppLayout title={app.name}>
             <PageHeader
                 title={app.name}
                 badge={<StatusBadge status={app.status} />}
-                description={app.git_url ?? undefined}
+                description={
+                    app.source_type === 'upload'
+                        ? 'Uploaded project'
+                        : (app.git_url ?? undefined)
+                }
                 actions={
                     <>
+                        {app.url && (
+                            <a
+                                href={app.url}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="btn btn-soft"
+                            >
+                                <ExternalLink className="size-4" aria-hidden />
+                                Visit
+                            </a>
+                        )}
                         <Link
                             href={AppController.index()}
                             className="btn btn-text"
@@ -156,52 +183,26 @@ export default function Show({
 
             {errors.deploy && <Alert variant="error">{errors.deploy}</Alert>}
 
-            <div className="grid items-start gap-6 xl:grid-cols-3">
-                <div className="min-w-0 space-y-6 xl:col-span-2">
-                    <DeploymentsCard
-                        slug={app.slug}
-                        deployments={deployments}
-                    />
-                    <SettingsCard app={app} />
-                    <AppDomains
-                        slug={app.slug}
-                        domains={app.domains}
-                        server={server}
-                    />
-                </div>
-                <div className="min-w-0 space-y-6">
-                    <Overview app={app} />
-                    <CertificateCard
-                        slug={app.slug}
-                        certificate={app.certificate}
-                        httpsEnabled={https.enabled}
-                        hasDomains={app.domains.length > 0}
-                    />
-                    <EnvCard slug={app.slug} keys={env_keys} />
-                    <DeployKeyCard
-                        slug={app.slug}
-                        publicKey={app.deploy_key_public}
-                    />
-                    <Card
-                        title="Delete app"
-                        description="Stops the app and removes its containers, images and settings."
-                    >
-                        <Button
-                            variant="error"
-                            onClick={() => setConfirmDelete(true)}
-                        >
-                            <Trash2 className="size-4" aria-hidden />
-                            Delete app
-                        </Button>
-                    </Card>
-                </div>
-            </div>
-
-            <DeleteAppModal
-                slug={app.slug}
-                open={confirmDelete}
-                onClose={() => setConfirmDelete(false)}
+            <Tabs
+                tabs={tabs}
+                active={tab}
+                onChange={select}
+                label="App sections"
             />
+
+            <div {...tabPanelProps(tab)} className="outline-none">
+                {tab === 'deployments' && (
+                    <DeploymentsTab app={app} deployments={deployments} />
+                )}
+                {tab === 'domains' && (
+                    <DomainsTab app={app} server={server} https={https} />
+                )}
+                {tab === 'environment' && (
+                    <EnvironmentTab slug={app.slug} keys={env_keys} />
+                )}
+                {tab === 'settings' && <SettingsTab app={app} />}
+                {tab === 'advanced' && <AdvancedTab app={app} />}
+            </div>
         </AppLayout>
     );
 }

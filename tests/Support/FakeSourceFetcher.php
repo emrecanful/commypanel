@@ -19,7 +19,13 @@ class FakeSourceFetcher implements SourceFetcher
         ],
         public string $sha = 'abc123def456',
         public ?Throwable $throw = null,
+        public ?string $message = 'Add the thing',
     ) {}
+
+    public function lastCommitMessage(): ?string
+    {
+        return $this->message;
+    }
 
     public function fetch(App $app, string $destination): string
     {

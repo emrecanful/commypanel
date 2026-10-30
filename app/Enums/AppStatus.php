@@ -10,4 +10,6 @@ enum AppStatus: string
     case Deploying = 'deploying';
     case Running = 'running';
     case Failed = 'failed';
+    /** Deactivated by the user: nothing runs and no domain is served. */
+    case Stopped = 'stopped';
 }

@@ -3,6 +3,8 @@
 use App\Http\Controllers\AppController;
 use App\Http\Controllers\AppDomainController;
 use App\Http\Controllers\AppSetupController;
+use App\Http\Controllers\AppSourceController;
+use App\Http\Controllers\AppStateController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\CertificateController;
 use App\Http\Controllers\DashboardController;
@@ -49,6 +51,10 @@ Route::middleware('auth')->group(function () {
         Route::delete('env/{key}', [EnvVarController::class, 'destroy'])->where('key', '[A-Za-z_][A-Za-z0-9_]*')->name('env.destroy');
         Route::post('deploy-key', [DeployKeyController::class, 'store'])->name('deploy-key.store');
         Route::post('domains', [AppDomainController::class, 'store'])->name('domains.store');
+        Route::post('source', [AppSourceController::class, 'upload'])->name('source.upload');
+        Route::post('deactivate', [AppStateController::class, 'deactivate'])->name('deactivate');
+        Route::post('activate', [AppStateController::class, 'activate'])->name('activate');
+        Route::post('env/import', [EnvVarController::class, 'import'])->name('env.import');
         Route::post('certificate', [CertificateController::class, 'store'])->name('certificate.store');
     });
 

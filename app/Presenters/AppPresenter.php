@@ -2,6 +2,8 @@
 
 namespace App\Presenters;
 
+use App\Enums\AppStatus;
+use App\Enums\DeploymentStatus;
 use App\Models\App;
 use App\Models\Deployment;
 use App\Models\Domain;
@@ -24,6 +26,7 @@ class AppPresenter
             'name' => $app->name,
             'stack' => $app->stack?->label(),
             'status' => $app->status()->value,
+            'source_type' => $app->source_type->value,
             'git_url' => $app->git_url,
             'git_branch' => $app->git_branch,
             'active_release' => $app->activeDeployment?->number,
@@ -43,6 +46,10 @@ class AppPresenter
             'memory_limit_mb' => $app->memory_limit_mb,
             'cpu_limit' => $app->cpu_limit === null ? null : (float) $app->cpu_limit,
             'deploy_key_public' => $app->deploy_key_public,
+            'stopped_release' => $app->status() === AppStatus::Stopped
+                ? $app->deployments()->where('status', DeploymentStatus::Stopped)->max('number')
+                : null,
+            'url' => self::liveUrl($app),
             'certificate' => self::certificate($app),
             'domains' => $app->domains->sortBy('name')->map(fn (Domain $domain) => self::domain($domain))->values()->all(),
         ];
@@ -78,6 +85,8 @@ class AppPresenter
             'stage' => $deployment->stage?->value,
             'finished' => $deployment->status->isFinished(),
             'commit' => $deployment->commit_sha === null ? null : substr($deployment->commit_sha, 0, 8),
+            'commit_message' => $deployment->commit_message,
+            'duration_seconds' => $deployment->finished_at !== null && $deployment->started_at !== null ? (int) $deployment->started_at->diffInSeconds($deployment->finished_at, true) : null,
             'is_rollback' => $deployment->rolled_back_from_id !== null,
             'can_roll_back' => $deployment->image_tag !== null && $deployment->image_available,
             'error' => $deployment->error,
@@ -85,6 +94,22 @@ class AppPresenter
             'finished_at' => $deployment->finished_at?->toIso8601String(),
             ...($withLog ? ['log' => $deployment->log ?? ''] : []),
         ];
+    }
+
+    /**
+     * Where the running app can be visited, if it has a live release and a domain.
+     */
+    private static function liveUrl(App $app): ?string
+    {
+        $domain = $app->domains->sortBy('name')->first(fn (Domain $d) => $d->redirect_to === null);
+
+        if ($app->active_deployment_id === null || $domain === null) {
+            return null;
+        }
+
+        $secure = $app->certificate !== null && $app->certificate->isUsable();
+
+        return ($secure ? 'https://' : 'http://').$domain->name;
     }
 
     /**

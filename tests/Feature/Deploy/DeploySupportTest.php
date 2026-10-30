@@ -86,9 +86,11 @@ describe('git fetcher', function () {
         $app = App::factory()->make(['source_type' => SourceType::Git, 'git_url' => $this->repo, 'git_branch' => 'main']);
         $expected = trim(Process::path($this->repo)->run(['git', 'rev-parse', 'HEAD'])->output());
 
-        $sha = (new GitSourceFetcher(new GitRunner))->fetch($app, $this->dir.'/out');
+        $fetcher = new GitSourceFetcher(new GitRunner);
+        $sha = $fetcher->fetch($app, $this->dir.'/out');
 
         expect($sha)->toBe($expected)
+            ->and($fetcher->lastCommitMessage())->toBe('init')
             ->and($this->dir.'/out/main.go')->toBeFile()
             ->and($this->dir.'/out/.git')->not->toBeDirectory();
     });

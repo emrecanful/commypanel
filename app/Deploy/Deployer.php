@@ -46,6 +46,7 @@ class Deployer
         $deployment = $this->create($app, [
             'image_tag' => $target->image_tag,
             'commit_sha' => $target->commit_sha,
+            'commit_message' => $target->commit_message,
             'rolled_back_from_id' => $target->id,
         ]);
 

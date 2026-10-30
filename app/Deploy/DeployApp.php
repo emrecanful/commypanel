@@ -107,7 +107,7 @@ class DeployApp
         $this->stage($deployment, DeploymentStage::Fetch);
         $log->step("Fetching {$app->git_url} ({$app->git_branch}).");
         $sha = $this->source->fetch($app, $workDir);
-        $deployment->forceFill(['commit_sha' => $sha])->save();
+        $deployment->forceFill(['commit_sha' => $sha, 'commit_message' => $this->source->lastCommitMessage()])->save();
         $log->step("Commit {$sha}.");
 
         try {

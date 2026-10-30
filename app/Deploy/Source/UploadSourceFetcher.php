@@ -9,6 +9,11 @@ class UploadSourceFetcher implements SourceFetcher
 {
     public function __construct(private readonly UploadStorage $storage) {}
 
+    public function lastCommitMessage(): ?string
+    {
+        return null;
+    }
+
     public function fetch(App $app, string $destination): string
     {
         if (! $this->storage->has($app)) {

@@ -1,0 +1,81 @@
+import { useForm } from '@inertiajs/react';
+import type { FormEvent } from 'react';
+import AppController from '@/actions/App/Http/Controllers/AppController';
+import { RuntimeFields, SourceFields } from '@/components/apps/app-fields';
+import type { AppFormData } from '@/components/apps/app-fields';
+import { DeployKeyCard } from '@/components/apps/deploy-key-card';
+import { UploadSourceCard } from '@/components/apps/upload-source-card';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import type { AppSettings } from '@/types';
+
+export function SettingsTab({ app }: { app: AppSettings }) {
+    const upload = app.source_type === 'upload';
+    const form = useForm<AppFormData>({
+        name: app.name,
+        git_url: app.git_url ?? '',
+        git_branch: app.git_branch,
+        container_port: String(app.container_port),
+        health_path: app.health_path,
+        memory_limit_mb: app.memory_limit_mb?.toString() ?? '',
+        cpu_limit: app.cpu_limit?.toString() ?? '',
+    });
+
+    const submit = (event: FormEvent) => {
+        event.preventDefault();
+        form.submit(AppController.update(app.slug), { preserveScroll: true });
+    };
+
+    const fields = {
+        data: form.data,
+        errors: form.errors,
+        setData: form.setData,
+    };
+
+    return (
+        <div className="grid items-start gap-6 xl:grid-cols-3">
+            <form onSubmit={submit} className="min-w-0 space-y-6 xl:col-span-2">
+                {upload ? (
+                    <Card title="Name">
+                        <Input
+                            label="App name"
+                            required
+                            value={form.data.name}
+                            onChange={(e) =>
+                                form.setData('name', e.target.value)
+                            }
+                            error={form.errors.name}
+                        />
+                    </Card>
+                ) : (
+                    <Card
+                        title="Source"
+                        description="Where the code comes from."
+                    >
+                        <SourceFields {...fields} />
+                    </Card>
+                )}
+                <Card
+                    title="Runtime"
+                    description="How the app runs. Changes apply from the next deployment."
+                >
+                    <RuntimeFields {...fields} />
+                </Card>
+                <Button type="submit" loading={form.processing}>
+                    Save settings
+                </Button>
+            </form>
+            <div className="min-w-0">
+                {upload ? (
+                    <UploadSourceCard slug={app.slug} />
+                ) : (
+                    <DeployKeyCard
+                        slug={app.slug}
+                        publicKey={app.deploy_key_public}
+                    />
+                )}
+            </div>
+        </div>
+    );
+}

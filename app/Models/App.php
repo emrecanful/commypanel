@@ -89,6 +89,7 @@ class App extends Model
             $this->setup_step !== null => AppStatus::Setup,
             $latest !== null && ! $latest->status->isFinished() => AppStatus::Deploying,
             $this->active_deployment_id !== null => AppStatus::Running,
+            $latest?->status === DeploymentStatus::Stopped => AppStatus::Stopped,
             $latest?->status === DeploymentStatus::Failed => AppStatus::Failed,
             default => AppStatus::New,
         };
