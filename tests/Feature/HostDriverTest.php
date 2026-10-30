@@ -3,6 +3,7 @@
 use App\Host\Data\ContainerSpec;
 use App\Host\Data\ImageBuildSpec;
 use App\Host\Data\NginxSite;
+use App\Host\Drivers\AgentHostDriver;
 use App\Host\Drivers\FakeHostDriver;
 use App\Host\Exceptions\HostOperationFailed;
 use App\Host\HostDriver;
@@ -44,3 +45,20 @@ it('rejects invalid names, domains and ports', function (callable $make) {
     'bad domain' => [fn () => new NginxSite('demo', ['bad domain;'], 20001)],
     'bad upstream port' => [fn () => new NginxSite('demo', ['a.example.com'], 99999)],
 ]);
+
+it('binds the agent driver only on Linux unless explicitly allowed', function () {
+    config(['commypanel.host_driver' => 'agent', 'commypanel.agent_allow_non_linux' => false]);
+    app()->forgetInstance(HostDriver::class);
+
+    if (PHP_OS_FAMILY === 'Linux') {
+        expect(app(HostDriver::class))->toBeInstanceOf(AgentHostDriver::class);
+
+        return;
+    }
+
+    expect(fn () => app(HostDriver::class))->toThrow(RuntimeException::class, 'only runs on Linux');
+
+    config(['commypanel.agent_allow_non_linux' => true]);
+    app()->forgetInstance(HostDriver::class);
+    expect(app(HostDriver::class))->toBeInstanceOf(AgentHostDriver::class);
+});

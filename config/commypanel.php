@@ -27,4 +27,19 @@ return [
 
     'host_driver' => env('HOST_DRIVER', 'fake'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Agent Socket
+    |--------------------------------------------------------------------------
+    |
+    | Unix socket of commypanel-agent, used by the "agent" host driver. The
+    | agent only runs on Linux; `agent_allow_non_linux` exists solely so a
+    | dry-run agent can be used during development on other systems.
+    |
+    */
+
+    'agent_socket' => env('AGENT_SOCKET', '/run/commypanel/agent.sock'),
+
+    'agent_allow_non_linux' => (bool) env('AGENT_ALLOW_NON_LINUX', false),
+
 ];

@@ -11,6 +11,7 @@ import (
 
 	"commypanel/agent/internal/nginx"
 	"commypanel/agent/internal/peercred"
+	"commypanel/agent/internal/system"
 	"commypanel/agent/internal/validate"
 )
 
@@ -30,6 +31,7 @@ type Options struct {
 	Authorize Authorizer
 	Version   string
 	DryRun    bool
+	System    func() system.Status
 }
 
 type Server struct{ opts Options }
@@ -80,7 +82,17 @@ func AllowUIDs(uids ...uint32) Authorizer {
 func AllowAll() Authorizer { return func(*http.Request) bool { return true } }
 
 func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"version": s.opts.Version, "dry_run": s.opts.DryRun})
+	var sys system.Status
+	if s.opts.System != nil {
+		sys = s.opts.System()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":          s.opts.Version,
+		"dry_run":          s.opts.DryRun,
+		"nginx_available":  sys.NginxAvailable,
+		"docker_available": sys.DockerAvailable,
+		"disk_free_bytes":  sys.DiskFreeBytes,
+	})
 }
 
 func (s *Server) applySite(w http.ResponseWriter, r *http.Request) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"commypanel/agent/internal/nginx"
+	"commypanel/agent/internal/system"
 	"commypanel/agent/internal/validate"
 )
 
@@ -64,8 +65,12 @@ func TestRefusesUnknownCaller(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
-	rec := do(t, newServer(&fakeNginx{}), "GET", "/v1/status", "")
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"version":"test"`) {
+	s := New(Options{Nginx: &fakeNginx{}, Authorize: AllowAll(), Version: "test",
+		System: func() system.Status { return system.Status{NginxAvailable: true, DiskFreeBytes: 42} }})
+	rec := do(t, s, "GET", "/v1/status", "")
+	body := rec.Body.String()
+	if rec.Code != 200 || !strings.Contains(body, `"version":"test"`) ||
+		!strings.Contains(body, `"nginx_available":true`) || !strings.Contains(body, `"disk_free_bytes":42`) {
 		t.Errorf("code=%d body=%s", rec.Code, rec.Body)
 	}
 }

@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Audit\AuditEventSubscriber;
 use App\Audit\AuditLogger;
+use App\Host\Drivers\AgentHostDriver;
 use App\Host\Drivers\FakeHostDriver;
 use App\Host\HostDriver;
 use Carbon\CarbonImmutable;
@@ -25,9 +26,18 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(HostDriver::class, fn (): HostDriver => match (config('commypanel.host_driver')) {
             'fake' => new FakeHostDriver,
-            'agent' => throw new RuntimeException('The agent host driver is not implemented yet.'),
+            'agent' => $this->agentDriver(),
             default => throw new RuntimeException('Unknown host driver ['.config('commypanel.host_driver').'].'),
         });
+    }
+
+    private function agentDriver(): HostDriver
+    {
+        if (PHP_OS_FAMILY !== 'Linux' && ! config('commypanel.agent_allow_non_linux')) {
+            throw new RuntimeException('The agent host driver only runs on Linux. Use HOST_DRIVER=fake for development.');
+        }
+
+        return new AgentHostDriver((string) config('commypanel.agent_socket'));
     }
 
     /**

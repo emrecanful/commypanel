@@ -21,6 +21,7 @@ import (
 
 	"commypanel/agent/internal/nginx"
 	"commypanel/agent/internal/server"
+	"commypanel/agent/internal/system"
 )
 
 var version = "dev"
@@ -78,7 +79,9 @@ func run() error {
 	}
 
 	mgr := nginx.NewManager(nginx.Config{SitesDir: *sitesDir, DataDir: *dataDir, DryRun: *dryRun}, nil)
-	srv := server.New(server.Options{Nginx: mgr, Authorize: authorize, Version: version, DryRun: *dryRun})
+	srv := server.New(server.Options{Nginx: mgr, Authorize: authorize, Version: version, DryRun: *dryRun,
+		System: func() system.Status { return system.Collect(*dataDir) },
+	})
 
 	ln, err := listen(*socket, *group, *dryRun)
 	if err != nil {
