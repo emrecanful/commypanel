@@ -1,0 +1,350 @@
+package docker
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"commypanel/agent/internal/validate"
+)
+
+// fakeDaemon is a tiny stand-in for the Docker Engine API.
+type fakeDaemon struct {
+	mu         sync.Mutex
+	requests   []string
+	created    map[string]any
+	labels     map[string]string // labels returned by inspect; nil = container missing
+	buildTar   []string
+	buildReply string
+}
+
+func (f *fakeDaemon) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/"):
+			w.WriteHeader(200)
+			w.Write([]byte(`{}`))
+		case r.URL.Path == "/containers/create":
+			_ = json.NewDecoder(r.Body).Decode(&f.created)
+			w.WriteHeader(201)
+			w.Write([]byte(`{"Id":"abc"}`))
+		case strings.HasSuffix(r.URL.Path, "/json") && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/containers/") && r.URL.Path != "/containers/json":
+			if f.labels == nil {
+				w.WriteHeader(404)
+				w.Write([]byte(`{"message":"no such container"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"Config": map[string]any{"Labels": f.labels}})
+		case r.URL.Path == "/containers/json":
+			w.Write([]byte(`[{"Names":["/demo-1"],"Image":"demo:1","State":"running","Status":"Up 2 minutes"}]`))
+		case strings.HasSuffix(r.URL.Path, "/logs"):
+			var buf bytes.Buffer
+			for _, line := range []string{"hello\n", "world\n"} {
+				h := make([]byte, 8)
+				h[0] = 1
+				binary.BigEndian.PutUint32(h[4:], uint32(len(line)))
+				buf.Write(h)
+				buf.WriteString(line)
+			}
+			w.Write(buf.Bytes())
+		case r.URL.Path == "/build":
+			tr := tar.NewReader(r.Body)
+			for {
+				hdr, err := tr.Next()
+				if err != nil {
+					break
+				}
+				f.buildTar = append(f.buildTar, hdr.Name)
+			}
+			w.Write([]byte(f.buildReply))
+		case r.URL.Path == "/images/prune":
+			w.Write([]byte(`{"SpaceReclaimed":1234}`))
+		default:
+			w.WriteHeader(204)
+		}
+	})
+}
+
+func (f *fakeDaemon) has(req string) bool {
+	for _, r := range f.requests {
+		if r == req {
+			return true
+		}
+	}
+	return false
+}
+
+func setup(t *testing.T) (*Manager, *fakeDaemon, string) {
+	t.Helper()
+	d := &fakeDaemon{labels: map[string]string{ManagedLabel: "true"}}
+	srv := httptest.NewServer(d.handler())
+	t.Cleanup(srv.Close)
+	dir := t.TempDir()
+	m := NewManager(Config{DataDir: dir}, NewEngine(srv.URL, nil))
+	return m, d, dir
+}
+
+func baseSpec() ContainerSpec {
+	return ContainerSpec{Name: "demo-1", Image: "commypanel/demo:r1", HostPort: 20001, ContainerPort: 8080}
+}
+
+func TestRunHardcodesSecuritySettings(t *testing.T) {
+	m, d, dir := setup(t)
+	spec := baseSpec()
+	spec.Env = map[string]string{"A": "1"}
+	spec.Volumes = []Volume{{Source: filepath.Join(dir, "volumes", "demo", "data"), Target: "/data"}}
+
+	if err := m.Run(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+
+	host := d.created["HostConfig"].(map[string]any)
+	if host["Privileged"] != false {
+		t.Error("container must not be privileged")
+	}
+	if host["NetworkMode"] != "commypanel" {
+		t.Errorf("network = %v", host["NetworkMode"])
+	}
+	if host["Memory"].(float64) != 512<<20 {
+		t.Errorf("default memory limit not applied: %v", host["Memory"])
+	}
+	if host["NanoCpus"].(float64) != 1e9 {
+		t.Errorf("default cpu limit not applied: %v", host["NanoCpus"])
+	}
+	if opts := host["SecurityOpt"].([]any); len(opts) != 1 || opts[0] != "no-new-privileges:true" {
+		t.Errorf("security opts = %v", opts)
+	}
+	binding := host["PortBindings"].(map[string]any)["8080/tcp"].([]any)[0].(map[string]any)
+	if binding["HostIp"] != "127.0.0.1" || binding["HostPort"] != "20001" {
+		t.Errorf("port must be bound to localhost only: %v", binding)
+	}
+	if d.created["Labels"].(map[string]any)[ManagedLabel] != "true" {
+		t.Error("managed label missing")
+	}
+	if !d.has("POST /containers/demo-1/start") {
+		t.Error("container not started")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "volumes", "demo", "data")); err != nil {
+		t.Errorf("volume dir not created: %v", err)
+	}
+}
+
+func TestRunRejectsDangerousSpecs(t *testing.T) {
+	m, d, dir := setup(t)
+	bad := map[string]func(*ContainerSpec){
+		"bad name":               func(s *ContainerSpec) { s.Name = "Demo;rm" },
+		"bad image":              func(s *ContainerSpec) { s.Image = "img --privileged" },
+		"privileged port":        func(s *ContainerSpec) { s.HostPort = 80 },
+		"missing container port": func(s *ContainerSpec) { s.ContainerPort = 0 },
+		"env key injection":      func(s *ContainerSpec) { s.Env = map[string]string{"A=B": "x"} },
+		"env nul":                func(s *ContainerSpec) { s.Env = map[string]string{"A": "x\x00y"} },
+		"docker socket mount": func(s *ContainerSpec) {
+			s.Volumes = []Volume{{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock"}}
+		},
+		"host root mount": func(s *ContainerSpec) { s.Volumes = []Volume{{Source: "/", Target: "/host"}} },
+		"traversal mount": func(s *ContainerSpec) {
+			s.Volumes = []Volume{{Source: filepath.Join(dir, "volumes", "..", "..", "etc"), Target: "/x"}}
+		},
+		"bad target": func(s *ContainerSpec) {
+			s.Volumes = []Volume{{Source: filepath.Join(dir, "volumes", "a"), Target: "/a:/b"}}
+		},
+		"tiny memory": func(s *ContainerSpec) { s.MemoryMB = 1 },
+		"bad network": func(s *ContainerSpec) { s.Network = "host;x" },
+	}
+	for name, mutate := range bad {
+		spec := baseSpec()
+		mutate(&spec)
+		err := m.Run(context.Background(), spec)
+		var ie *validate.InputError
+		if !errors.As(err, &ie) {
+			t.Errorf("%s: want *InputError, got %v", name, err)
+		}
+	}
+	if d.has("POST /containers/create") {
+		t.Error("nothing invalid may reach Docker")
+	}
+}
+
+func TestStopAndRemoveOnlyTouchManagedContainers(t *testing.T) {
+	m, d, _ := setup(t)
+	d.labels = map[string]string{"other": "x"}
+
+	for name, fn := range map[string]func() error{
+		"stop":   func() error { return m.Stop(context.Background(), "someone-elses") },
+		"remove": func() error { return m.Remove(context.Background(), "someone-elses") },
+	} {
+		var ie *validate.InputError
+		if err := fn(); !errors.As(err, &ie) {
+			t.Errorf("%s: want *InputError for an unmanaged container, got %v", name, err)
+		}
+	}
+	if d.has("POST /containers/someone-elses/stop") || d.has("DELETE /containers/someone-elses") {
+		t.Error("an unmanaged container must never be stopped or removed")
+	}
+}
+
+func TestStopAndRemoveAreIdempotent(t *testing.T) {
+	m, d, _ := setup(t)
+	d.labels = nil // container does not exist
+	if err := m.Stop(context.Background(), "gone"); err != nil {
+		t.Errorf("stop missing: %v", err)
+	}
+	if err := m.Remove(context.Background(), "gone"); err != nil {
+		t.Errorf("remove missing: %v", err)
+	}
+}
+
+func TestRemoveForceRemovesManagedContainer(t *testing.T) {
+	m, d, _ := setup(t)
+	if err := m.Remove(context.Background(), "demo-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.has("DELETE /containers/demo-1") {
+		t.Error("expected DELETE")
+	}
+}
+
+func TestListAndLogsAndPrune(t *testing.T) {
+	m, _, _ := setup(t)
+	list, err := m.List(context.Background())
+	if err != nil || len(list) != 1 || list[0].Name != "demo-1" || list[0].State != "running" {
+		t.Errorf("list = %v, %v", list, err)
+	}
+	logs, err := m.Logs(context.Background(), "demo-1", 100)
+	if err != nil || logs != "hello\nworld\n" {
+		t.Errorf("logs = %q, %v", logs, err)
+	}
+	if _, err := m.Logs(context.Background(), "demo-1", 0); err == nil {
+		t.Error("tail=0 must be rejected")
+	}
+	n, err := m.PruneImages(context.Background())
+	if err != nil || n != 1234 {
+		t.Errorf("prune = %d, %v", n, err)
+	}
+}
+
+func TestUnavailableDaemon(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close() // nothing listens any more
+	m := NewManager(Config{DataDir: t.TempDir()}, NewEngine(srv.URL, nil))
+
+	err := m.Run(context.Background(), baseSpec())
+	if !errors.Is(err, ErrUnavailable) {
+		t.Errorf("want ErrUnavailable, got %v", err)
+	}
+}
+
+func TestDryRunNeverCallsDocker(t *testing.T) {
+	d := &fakeDaemon{}
+	srv := httptest.NewServer(d.handler())
+	defer srv.Close()
+	m := NewManager(Config{DataDir: t.TempDir(), DryRun: true}, NewEngine(srv.URL, nil))
+
+	ctx := context.Background()
+	if err := m.Run(ctx, baseSpec()); err != nil {
+		t.Error(err)
+	}
+	if err := m.Stop(ctx, "demo-1"); err != nil {
+		t.Error(err)
+	}
+	if err := m.Remove(ctx, "demo-1"); err != nil {
+		t.Error(err)
+	}
+	if _, err := m.List(ctx); err != nil {
+		t.Error(err)
+	}
+	bad := baseSpec()
+	bad.Image = "bad image"
+	if err := m.Run(ctx, bad); err == nil {
+		t.Error("dry run must still validate")
+	}
+	if len(d.requests) != 0 {
+		t.Errorf("dry run called Docker: %v", d.requests)
+	}
+}
+
+func buildContext(t *testing.T, dir string) string {
+	t.Helper()
+	ctxDir := filepath.Join(dir, "builds", "demo-1")
+	if err := os.MkdirAll(filepath.Join(ctxDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(ctxDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644)
+	os.WriteFile(filepath.Join(ctxDir, "src", "main.go"), []byte("package main\n"), 0o644)
+	os.Symlink("/etc/passwd", filepath.Join(ctxDir, "link"))
+	return ctxDir
+}
+
+func TestBuildStreamsContextAndLogs(t *testing.T) {
+	m, d, dir := setup(t)
+	d.buildReply = `{"stream":"Step 1/1 : FROM scratch\n"}` + "\n" + `{"aux":{"ID":"sha256:x"}}` + "\n" + `{"stream":"Successfully built\n"}` + "\n"
+	ctxDir := buildContext(t, dir)
+
+	var lines []string
+	err := m.Build(context.Background(), BuildSpec{Tag: "commypanel/demo:r1", ContextPath: ctxDir}, func(l string) { lines = append(lines, l) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(lines, "|"); got != "Step 1/1 : FROM scratch|Successfully built" {
+		t.Errorf("log lines = %q", got)
+	}
+	tarred := strings.Join(d.buildTar, ",")
+	for _, want := range []string{"Dockerfile", "src/", "src/main.go", "link"} {
+		if !strings.Contains(tarred, want) {
+			t.Errorf("tar missing %q: %s", want, tarred)
+		}
+	}
+}
+
+func TestBuildReportsFailure(t *testing.T) {
+	m, d, dir := setup(t)
+	d.buildReply = `{"stream":"Step 1\n"}` + "\n" + `{"error":"The command failed","errorDetail":{"message":"x"}}` + "\n"
+	err := m.Build(context.Background(), BuildSpec{Tag: "commypanel/demo:r1", ContextPath: buildContext(t, dir)}, func(string) {})
+	if err == nil || !strings.Contains(err.Error(), "The command failed") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestBuildRejectsBadSpecs(t *testing.T) {
+	m, d, dir := setup(t)
+	ctxDir := buildContext(t, dir)
+	for name, spec := range map[string]BuildSpec{
+		"foreign tag":         {Tag: "library/alpine:3", ContextPath: ctxDir},
+		"bad tag":             {Tag: "commypanel/Demo;x", ContextPath: ctxDir},
+		"context outside":     {Tag: "commypanel/demo:r1", ContextPath: "/etc"},
+		"context traversal":   {Tag: "commypanel/demo:r1", ContextPath: ctxDir + "/../../.."},
+		"dockerfile escape":   {Tag: "commypanel/demo:r1", ContextPath: ctxDir, Dockerfile: "../../etc/passwd"},
+		"absolute dockerfile": {Tag: "commypanel/demo:r1", ContextPath: ctxDir, Dockerfile: "/etc/passwd"},
+	} {
+		if err := m.Build(context.Background(), spec, func(string) {}); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	if d.has("POST /build") {
+		t.Error("an invalid build must not reach Docker")
+	}
+}
+
+func TestBuildNeedsADockerfile(t *testing.T) {
+	m, _, dir := setup(t)
+	empty := filepath.Join(dir, "builds", "empty")
+	os.MkdirAll(empty, 0o755)
+	err := m.Build(context.Background(), BuildSpec{Tag: "commypanel/demo:r1", ContextPath: empty}, func(string) {})
+	var ie *validate.InputError
+	if !errors.As(err, &ie) {
+		t.Errorf("want *InputError, got %v", err)
+	}
+}

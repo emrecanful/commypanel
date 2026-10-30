@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"commypanel/agent/internal/docker"
 	"commypanel/agent/internal/nginx"
 	"commypanel/agent/internal/server"
 	"commypanel/agent/internal/system"
@@ -47,12 +48,17 @@ func main() {
 
 func run() error {
 	var (
-		socket   = flag.String("socket", "/run/commypanel/agent.sock", "Unix socket path")
-		group    = flag.String("socket-group", "commypanel", "group that may connect to the socket")
-		dataDir  = flag.String("data-dir", "/var/lib/commypanel", "panel data directory")
-		sitesDir = flag.String("nginx-sites-dir", "/etc/nginx/commypanel", "directory nginx includes site configs from")
-		dryRun   = flag.Bool("dry-run", false, "write configs but never run nginx or Docker (development)")
-		allowed  uidList
+		socket     = flag.String("socket", "/run/commypanel/agent.sock", "Unix socket path")
+		group      = flag.String("socket-group", "commypanel", "group that may connect to the socket")
+		dataDir    = flag.String("data-dir", "/var/lib/commypanel", "panel data directory")
+		sitesDir   = flag.String("nginx-sites-dir", "/etc/nginx/commypanel", "directory nginx includes site configs from")
+		dockerSock = flag.String("docker-socket", "/var/run/docker.sock", "Docker Engine socket")
+		defMemory  = flag.Int("default-memory-mb", 512, "memory limit for containers that do not set one")
+		defCPUs    = flag.Float64("default-cpus", 1, "CPU limit for containers that do not set one")
+		buildMem   = flag.Int("build-memory-mb", 2048, "memory limit for image builds")
+		buildCPUs  = flag.Float64("build-cpus", 2, "CPU limit for image builds")
+		dryRun     = flag.Bool("dry-run", false, "write configs but never run nginx or Docker (development)")
+		allowed    uidList
 	)
 	flag.Var(&allowed, "allow-uid", "UID allowed to call the agent (repeatable; the panel's user)")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -79,7 +85,12 @@ func run() error {
 	}
 
 	mgr := nginx.NewManager(nginx.Config{SitesDir: *sitesDir, DataDir: *dataDir, DryRun: *dryRun}, nil)
-	srv := server.New(server.Options{Nginx: mgr, Authorize: authorize, Version: version, DryRun: *dryRun,
+	dockerMgr := docker.NewManager(docker.Config{
+		DataDir: *dataDir, DryRun: *dryRun,
+		DefaultMemoryMB: *defMemory, DefaultCPUs: *defCPUs,
+		BuildMemoryMB: *buildMem, BuildCPUs: *buildCPUs,
+	}, docker.NewUnixEngine(*dockerSock))
+	srv := server.New(server.Options{Nginx: mgr, Docker: dockerMgr, Authorize: authorize, Version: version, DryRun: *dryRun,
 		System: func() system.Status { return system.Collect(*dataDir) },
 	})
 

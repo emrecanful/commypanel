@@ -2,6 +2,7 @@
 
 namespace App\Host\Drivers;
 
+use App\Host\Data\ContainerInfo;
 use App\Host\Data\ContainerSpec;
 use App\Host\Data\ImageBuildSpec;
 use App\Host\Data\NginxSite;
@@ -71,6 +72,29 @@ class FakeHostDriver implements HostDriver
         ResourceName::assertValid($name);
         $this->record('removeContainer', ['name' => $name]);
         unset($this->containers[$name]);
+    }
+
+    public function listContainers(): array
+    {
+        return array_values(array_map(
+            fn (ContainerSpec $spec) => new ContainerInfo($spec->name, $spec->image, 'running', 'Up (fake)'),
+            $this->containers,
+        ));
+    }
+
+    public function containerLogs(string $name, int $tail = 200): string
+    {
+        ResourceName::assertValid($name);
+        $this->record('containerLogs', ['name' => $name, 'tail' => $tail]);
+
+        return "[fake] logs for {$name}\n";
+    }
+
+    public function pruneDanglingImages(): int
+    {
+        $this->record('pruneDanglingImages', []);
+
+        return 0;
     }
 
     /**

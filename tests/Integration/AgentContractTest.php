@@ -1,5 +1,7 @@
 <?php
 
+use App\Host\Data\ContainerSpec;
+use App\Host\Data\ImageBuildSpec;
 use App\Host\Data\NginxSite;
 use App\Host\Drivers\AgentHostDriver;
 use App\Host\Exceptions\HostOperationFailed;
@@ -69,6 +71,38 @@ it('surfaces agent validation errors', function () {
         ->toThrow(HostOperationFailed::class, 'invalid domain');
 
     expect($this->dir.'/sites/commypanel-demo.conf')->not->toBeFile();
+});
+
+it('validates and accepts Docker operations in dry-run mode', function () {
+    $this->driver->runContainer(new ContainerSpec('demo-1', 'commypanel/demo:r1', 20001, 8080));
+    $this->driver->stopContainer('demo-1');
+    $this->driver->removeContainer('demo-1');
+
+    expect($this->driver->listContainers())->toBe([])
+        ->and($this->driver->pruneDanglingImages())->toBe(0);
+});
+
+it('surfaces agent-side Docker validation errors', function () {
+    // The PHP DTO accepts this image; the agent's allow-list does not.
+    expect(fn () => $this->driver->runContainer(new ContainerSpec('demo-1', 'Not A Valid Image', 20001, 8080)))
+        ->toThrow(HostOperationFailed::class, 'invalid image');
+});
+
+it('streams a dry-run build', function () {
+    $lines = [];
+    $this->driver->buildImage(
+        new ImageBuildSpec('commypanel/demo:r1', $this->dir.'/data/builds/demo'),
+        function (string $line) use (&$lines) {
+            $lines[] = $line;
+        },
+    );
+
+    expect($lines)->toBe(['[dry-run] would build commypanel/demo:r1']);
+});
+
+it('rejects a build context outside the builds directory', function () {
+    expect(fn () => $this->driver->buildImage(new ImageBuildSpec('commypanel/demo:r1', '/etc')))
+        ->toThrow(HostOperationFailed::class, 'outside the allowed directory');
 });
 
 it('is refused when the caller is not on the allow-list', function () {
