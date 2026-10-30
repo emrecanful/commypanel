@@ -145,27 +145,36 @@ unsupported() {
     fi
 }
 
+# os_field NAME: read one field of /etc/os-release. The file is sourced in a
+# subshell because it defines names such as VERSION that must not leak into
+# this script (it once overwrote the release version).
+os_field() {
+    ( . "${COMMYPANEL_OS_RELEASE:-/etc/os-release}" && eval "printf '%s' \"\${$1:-}\"" )
+}
+
 detect_os() {
-    [ -r /etc/os-release ] || die "Cannot read /etc/os-release."
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    OS_ID="${ID:-unknown}"
-    OS_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+    [ -r "${COMMYPANEL_OS_RELEASE:-/etc/os-release}" ] || die "Cannot read /etc/os-release."
+    OS_ID="$(os_field ID)"
+    OS_ID="${OS_ID:-unknown}"
+    OS_VERSION_ID="$(os_field VERSION_ID)"
+    OS_CODENAME="$(os_field UBUNTU_CODENAME)"
+    if [ -z "$OS_CODENAME" ]; then OS_CODENAME="$(os_field VERSION_CODENAME)"; fi
+    OS_NAME="$(os_field PRETTY_NAME)"
     case "$OS_ID" in
         ubuntu)
-            case "${VERSION_ID:-}" in
+            case "$OS_VERSION_ID" in
                 24.04|26.04) ;;
-                *) unsupported "Ubuntu ${VERSION_ID:-?} is not supported." ;;
+                *) unsupported "Ubuntu ${OS_VERSION_ID:-?} is not supported." ;;
             esac
             ;;
         debian)
-            local major="${VERSION_ID%%.*}"
+            local major="${OS_VERSION_ID%%.*}"
             case "$major" in
                 ""|*[!0-9]*) unsupported "Could not read the Debian version." ;;
                 *) if [ "$major" -lt 13 ]; then unsupported "Debian $major is not supported (it ships PHP older than 8.3)."; fi ;;
             esac
             ;;
-        *) unsupported "${PRETTY_NAME:-This distribution} is not supported." ;;
+        *) unsupported "${OS_NAME:-This distribution} is not supported." ;;
     esac
 }
 
@@ -367,7 +376,9 @@ prepare_release() {
 
     log "Preparing release $VERSION"
     chown -R root:root "$RELEASE_DIR"
-    chmod -R go-w "$RELEASE_DIR"
+    # Readable (and enterable) by everyone, writable by root only. The unpacked
+    # tarball's top folder can arrive as 0700, which would lock out the panel user.
+    chmod -R go+rX,go-w "$RELEASE_DIR"
 
     # The code stays read-only for the panel user; only these paths are writable.
     # The bootstrap cache is per release: a rollback must never see the caches of a newer version.
@@ -536,6 +547,13 @@ prune_releases() {
             rm -rf "${dir:?}" "${DATA_DIR:?}/bootstrap-cache/$(basename "$dir")"
         fi
     done
+
+    local cache
+    for cache in "$DATA_DIR"/bootstrap-cache/*; do
+        if [ -d "$cache" ] && [ ! -d "$PREFIX/releases/$(basename "$cache")" ]; then
+            rm -rf "${cache:?}"
+        fi
+    done
 }
 
 # ---------------------------------------------------------------------- main
@@ -550,9 +568,11 @@ main() {
     if [ -z "$VERSION" ] && [ "$SYSTEM" != 1 ]; then VERSION="0.0.0-dev"; fi
     [ -n "$VERSION" ] || die "This release has no VERSION file."
 
-    # An existing environment file means CommyPanel is already installed here.
+    # It is an upgrade only if a release has gone live before. An environment file
+    # without one is a first install that stopped half-way: resume it as a fresh
+    # install (the existing settings and APP_KEY are kept).
     UPGRADE=0
-    if [ -f "$(p "$CONF_DIR/env")" ]; then UPGRADE=1; fi
+    if [ -f "$(p "$CONF_DIR/env")" ] && { [ -L "$PREFIX/current" ] || [ "$SYSTEM" != 1 ]; }; then UPGRADE=1; fi
     if [ "$UPGRADE_FLAG" = 1 ] && [ "$UPGRADE" = 0 ] && [ "$SYSTEM" = 1 ]; then
         die "There is no existing installation to upgrade. Run the installer without --upgrade."
     fi
@@ -603,13 +623,15 @@ main() {
         return 0
     fi
 
-    if [ "$UPGRADE" = 1 ]; then
+    # setup-url only succeeds while no admin account exists.
+    local url
+    url="$(as_panel commypanel:setup-url 2>/dev/null | grep -Eo 'https?://[^[:space:]]+' | head -n 1 || true)"
+
+    if [ "$UPGRADE" = 1 ] && [ -z "$url" ]; then
         log "CommyPanel is now version $VERSION."
         return 0
     fi
 
-    local url
-    url="$(as_panel commypanel:setup-url 2>/dev/null | grep -Eo 'https?://[^[:space:]]+' | head -n 1 || true)"
     printf '\n'
     printf '\033[1;32mCommyPanel %s is installed.\033[0m\n\n' "$VERSION"
     printf '  Create your admin account (works once, expires in 1 hour):\n\n    %s\n\n' "${url:-run: sudo commypanel setup-url}"
@@ -621,4 +643,7 @@ main() {
     printf '\n  Manage the panel:  sudo commypanel help\n\n'
 }
 
-main
+# Tests source this file to call single functions without running an install.
+if [ "${COMMYPANEL_SOURCE_ONLY:-0}" != 1 ]; then
+    main
+fi

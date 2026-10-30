@@ -211,6 +211,65 @@ it('never lets the panel user write to the release code', function () {
     $setup = file_get_contents(base_path('installer/setup.sh'));
 
     expect($setup)->toContain('chown -R root:root "$RELEASE_DIR"')
-        ->toContain('chmod -R go-w "$RELEASE_DIR"')
+        ->toContain('go+rX,go-w "$RELEASE_DIR"')
         ->toContain('bootstrap-cache/$VERSION');
+});
+
+describe('operating system detection', function () {
+    $detect = function (string $fixture, array $env = []) {
+        return Process::env($env)->run([
+            'bash', base_path('tests/Fixtures/installer/detect-os.sh'),
+            base_path(), base_path("tests/Fixtures/installer/os-release/{$fixture}"),
+        ]);
+    };
+
+    it('reads supported systems and keeps the release version intact', function (string $fixture, string $expected) use ($detect) {
+        $result = $detect($fixture);
+
+        expect($result->successful())->toBeTrue($result->errorOutput())
+            ->and(trim($result->output()))->toBe($expected);
+    })->with([
+        // Ubuntu 26.04's os-release defines VERSION="26.04.1 LTS (...)", which once overwrote the release version.
+        'ubuntu 26.04' => ['ubuntu-26.04', 'id=ubuntu version_id=26.04 codename=resolute release=0.1.0'],
+        'ubuntu 24.04' => ['ubuntu-24.04', 'id=ubuntu version_id=24.04 codename=noble release=0.1.0'],
+        'debian 13' => ['debian-13', 'id=debian version_id=13 codename=trixie release=0.1.0'],
+    ]);
+
+    it('refuses unsupported systems with a helpful message', function (string $fixture, string $mention) use ($detect) {
+        $result = $detect($fixture);
+
+        expect($result->failed())->toBeTrue()
+            ->and($result->errorOutput())->toContain($mention)->toContain('Ubuntu 24.04 and 26.04');
+    })->with([
+        'ubuntu 22.04' => ['ubuntu-22.04', 'Ubuntu 22.04'],
+        'debian 12' => ['debian-12', 'Debian 12'],
+        'fedora' => ['fedora-42', 'Fedora'],
+    ]);
+
+    it('lets an expert override an unsupported system', function () use ($detect) {
+        $result = $detect('debian-12', ['COMMYPANEL_ALLOW_UNSUPPORTED' => '1']);
+
+        expect($result->successful())->toBeTrue()
+            ->and($result->errorOutput())->toContain('continuing because COMMYPANEL_ALLOW_UNSUPPORTED=1');
+    });
+
+    it('does not run an install when the script is only sourced', function () use ($detect) {
+        expect(trim($detect('ubuntu-24.04')->output()))->not->toContain('Installing CommyPanel');
+    });
+});
+
+it('makes the release readable for the panel user and the tarball root world-readable', function () {
+    $setup = file_get_contents(base_path('installer/setup.sh'));
+    $build = file_get_contents(base_path('scripts/build-release.sh'));
+
+    expect($setup)->toContain('chmod -R go+rX,go-w "$RELEASE_DIR"')
+        ->and($build)->toContain('chmod 755 "$STAGE"')
+        ->and(strpos($build, 'chmod 755 "$STAGE"'))->toBeLessThan(strpos($build, 'tar -czf'));
+});
+
+it('resumes a half-finished install instead of treating it as an upgrade', function () {
+    $setup = file_get_contents(base_path('installer/setup.sh'));
+
+    expect($setup)->toContain('[ -L "$PREFIX/current" ]')
+        ->and($setup)->toContain('first install that stopped half-way');
 });

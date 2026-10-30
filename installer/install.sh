@@ -58,9 +58,9 @@ else
     fi
     log "Downloading CommyPanel ($VERSION)"
     curl -fsSL --proto '=https' --tlsv1.2 -o "$WORK/commypanel.tar.gz" "$base/commypanel.tar.gz" \
-        || die "Could not download $base/commypanel.tar.gz"
+        || die "Could not download $base/commypanel.tar.gz. Check that the release has the files commypanel.tar.gz and commypanel.tar.gz.sha256 attached: https://github.com/$REPO/releases"
     curl -fsSL --proto '=https' --tlsv1.2 -o "$WORK/commypanel.tar.gz.sha256" "$base/commypanel.tar.gz.sha256" \
-        || die "Could not download the checksum file."
+        || die "Could not download $base/commypanel.tar.gz.sha256 (the release needs that file too)."
 fi
 
 if [ -f "$WORK/commypanel.tar.gz.sha256" ]; then

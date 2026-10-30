@@ -61,6 +61,8 @@ for arch in amd64 arm64; do
 done
 
 printf '%s\n' "$VERSION" > "$STAGE/VERSION"
+# mktemp creates 0700; the tarball's top folder must stay readable for the panel user.
+chmod 755 "$STAGE"
 chmod +x "$STAGE/installer/install.sh" "$STAGE/installer/setup.sh" "$STAGE/artisan"
 
 log "Packing"
