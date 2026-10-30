@@ -27,6 +27,30 @@ type Site struct {
 	Domains      []string `json:"domains"`
 	UpstreamPort int      `json:"upstream_port"`
 	Certificate  string   `json:"certificate,omitempty"`
+	// Redirects send some of the site's domains to another one of them,
+	// for example example.com to www.example.com.
+	Redirects []Redirect `json:"redirects,omitempty"`
+}
+
+// Redirect is a permanent redirect between two of a site's domains.
+type Redirect struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// served returns the domains that proxy to the app (the ones not redirected).
+func (s Site) served() []string {
+	redirected := map[string]bool{}
+	for _, r := range s.Redirects {
+		redirected[r.From] = true
+	}
+	var out []string
+	for _, d := range s.Domains {
+		if !redirected[d] {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func (s Site) Validate() error {
@@ -44,8 +68,46 @@ func (s Site) Validate() error {
 	if err := validate.Port(s.UpstreamPort); err != nil {
 		return err
 	}
+	if err := s.validateRedirects(); err != nil {
+		return err
+	}
 	if s.Certificate != "" {
 		return validate.Name(s.Certificate)
+	}
+	return nil
+}
+
+func (s Site) validateRedirects() error {
+	if len(s.Redirects) > 25 {
+		return &validate.InputError{Msg: "too many redirects"}
+	}
+	known := map[string]bool{}
+	for _, d := range s.Domains {
+		known[d] = true
+	}
+	from := map[string]bool{}
+	for _, r := range s.Redirects {
+		if err := validate.Domain(r.From); err != nil {
+			return err
+		}
+		if err := validate.Domain(r.To); err != nil {
+			return err
+		}
+		if r.From == r.To || !known[r.From] || !known[r.To] {
+			return &validate.InputError{Msg: "a redirect must go between two different domains of the site"}
+		}
+		if from[r.From] {
+			return &validate.InputError{Msg: "a domain can only redirect once"}
+		}
+		from[r.From] = true
+	}
+	for _, r := range s.Redirects {
+		if from[r.To] {
+			return &validate.InputError{Msg: "a redirect cannot point at a domain that redirects itself"}
+		}
+	}
+	if len(s.served()) == 0 {
+		return &validate.InputError{Msg: "a site needs at least one domain that is not redirected"}
 	}
 	return nil
 }
@@ -117,6 +179,36 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+{{range .Redirects}}
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{.From}};
+
+    location /.well-known/acme-challenge/ {
+        root {{$.Webroot}};
+    }
+
+    location / {
+        return 301 {{if $.CertDir}}https{{else}}http{{end}}://{{.To}}$request_uri;
+    }
+}
+{{if $.CertDir}}
+server {
+    listen 443 ssl{{if not $.ModernHTTP2}} http2{{end}};
+    listen [::]:443 ssl{{if not $.ModernHTTP2}} http2{{end}};
+{{if $.ModernHTTP2}}    http2 on;
+{{end}}    server_name {{.From}};
+
+    ssl_certificate {{$.CertDir}}/fullchain.pem;
+    ssl_certificate_key {{$.CertDir}}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location / {
+        return 301 https://{{.To}}$request_uri;
+    }
+}
+{{end}}{{end}}
 `))
 
 var defaultTmpl = template.Must(template.New("default").Parse(`# Managed by CommyPanel. Do not edit; changes are overwritten.
@@ -172,8 +264,10 @@ func (m *Manager) Render(s Site) (string, error) {
 		ServerNames, Webroot, CertDir string
 		Port                          int
 		ModernHTTP2                   bool
+		Redirects                     []Redirect
 	}{
-		ServerNames: strings.Join(s.Domains, " "),
+		ServerNames: strings.Join(s.served(), " "),
+		Redirects:   s.Redirects,
 		Webroot:     filepath.Join(m.cfg.DataDir, "acme-webroot"),
 		Port:        s.UpstreamPort,
 	}

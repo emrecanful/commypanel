@@ -141,35 +141,63 @@ it('only moves on once the source is verified', function () {
     expect($app->fresh()->setup_step)->toBe(SetupStep::Source);
 });
 
-it('finishes setup: saves settings and variables and queues the first deployment', function () {
+it('saves settings and variables and moves on to the domain step', function () {
     Queue::fake();
     $app = draft(['setup_step' => SetupStep::Settings, 'source_verified_at' => now()]);
 
-    $response = $this->post("/apps/{$app->slug}/setup/finish", [
+    $this->post("/apps/{$app->slug}/setup/settings", [
         'container_port' => 3000,
         'health_path' => '/healthz',
         'memory_limit_mb' => 256,
         'cpu_limit' => 0.5,
         'env' => "# comment\nGREETING=\"hello there\"\nexport TOKEN=abc # trailing\nPORT=1\nnot valid\n",
-    ]);
+    ])->assertRedirect("/apps/{$app->slug}/setup");
 
-    $response->assertRedirect("/apps/{$app->slug}/deployments/1");
     $app->refresh();
-    expect($app)->setup_step->toBeNull()->container_port->toBe(3000)->memory_limit_mb->toBe(256)
+    expect($app)->setup_step->toBe(SetupStep::Domain)->container_port->toBe(3000)->memory_limit_mb->toBe(256)
         ->and(AppEnvVar::query()->where('app_id', $app->id)->pluck('value', 'key')->all())->toBe(['GREETING' => 'hello there', 'TOKEN' => 'abc'])
+        ->and(Deployment::query()->count())->toBe(0);
+
+    Queue::assertNothingPushed();
+});
+
+it('finishes setup with the first deployment, with or without a domain', function (bool $withDomain) {
+    Queue::fake();
+    $app = draft(['setup_step' => SetupStep::Domain, 'source_verified_at' => now()]);
+
+    if ($withDomain) {
+        $this->post("/apps/{$app->slug}/domains", ['name' => 'shop.example.com', 'redirect' => 'none'])->assertSessionHasNoErrors();
+    }
+
+    $this->post("/apps/{$app->slug}/setup/finish")->assertRedirect("/apps/{$app->slug}/deployments/1");
+
+    expect($app->fresh()->setup_step)->toBeNull()
         ->and(Deployment::query()->count())->toBe(1);
 
     Queue::assertPushed(RunDeployment::class);
+})->with([true, false]);
+
+it('lets the user go back a step', function () {
+    $app = draft(['setup_step' => SetupStep::Domain, 'source_verified_at' => now()]);
+
+    $this->post("/apps/{$app->slug}/setup/back");
+    expect($app->fresh()->setup_step)->toBe(SetupStep::Settings);
+
+    $this->post("/apps/{$app->slug}/setup/back");
+    expect($app->fresh()->setup_step)->toBe(SetupStep::Source);
+
+    $this->post("/apps/{$app->slug}/setup/back")->assertNotFound();
 });
 
-it('does not finish before the settings step or with a bad port', function () {
+it('does not take settings out of order or with a bad port', function () {
     Queue::fake();
     $app = draft();
 
-    $this->post("/apps/{$app->slug}/setup/finish", ['container_port' => 80, 'health_path' => '/'])->assertNotFound();
+    $this->post("/apps/{$app->slug}/setup/settings", ['container_port' => 80, 'health_path' => '/'])->assertNotFound();
+    $this->post("/apps/{$app->slug}/setup/finish")->assertNotFound();
 
     $app->update(['setup_step' => SetupStep::Settings, 'source_verified_at' => now()]);
-    $this->post("/apps/{$app->slug}/setup/finish", ['container_port' => 99999, 'health_path' => '/'])->assertSessionHasErrors('container_port');
+    $this->post("/apps/{$app->slug}/setup/settings", ['container_port' => 99999, 'health_path' => '/'])->assertSessionHasErrors('container_port');
 
     Queue::assertNothingPushed();
 });

@@ -1,8 +1,10 @@
+import type { DomainRow } from './domain';
+
 export type AppStatus = 'setup' | 'new' | 'deploying' | 'running' | 'failed';
 
 export type AppStack = 'dotnet' | 'go' | 'node';
 
-export type SetupStep = 'source' | 'settings';
+export type SetupStep = 'source' | 'settings' | 'domain';
 
 export type SourceAccess = {
     state:
@@ -43,7 +45,7 @@ export type AppSettings = AppSummary & {
     memory_limit_mb: number | null;
     cpu_limit: number | null;
     deploy_key_public: string | null;
-    domains: { name: string; status: string }[];
+    domains: DomainRow[];
     certificate: CertificateSummary | null;
 };
 

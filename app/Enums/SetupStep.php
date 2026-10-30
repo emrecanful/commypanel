@@ -10,4 +10,5 @@ enum SetupStep: string
 {
     case Source = 'source';
     case Settings = 'settings';
+    case Domain = 'domain';
 }

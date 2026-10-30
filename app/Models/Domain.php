@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
  * @property string $name
  * @property DomainStatus $status
  * @property int|null $app_id
+ * @property string|null $redirect_to
  * @property array<string, mixed>|null $last_check
  * @property Carbon|null $last_checked_at
  * @property Carbon|null $verified_at

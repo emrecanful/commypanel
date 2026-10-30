@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import AppSetupController from '@/actions/App/Http/Controllers/AppSetupController';
 import DeployKeyController from '@/actions/App/Http/Controllers/DeployKeyController';
+import { AppDomains } from '@/components/apps/app-domains';
 import { SetupSteps } from '@/components/apps/setup-steps';
 import { PageHeader } from '@/components/page-header';
 import { Alert } from '@/components/ui/alert';
@@ -12,16 +13,17 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import AppLayout from '@/layouts/app-layout';
 import { postJson } from '@/lib/post-json';
-import type { AppSetup, SourceAccess } from '@/types';
+import type { AppSetup, ServerAddress, SourceAccess } from '@/types';
 
 type Provider = { name: string; url: string | null; steps: string[] };
 type Props = {
     app: AppSetup;
     provider: Provider | null;
+    server: ServerAddress;
     limits: { max_archive_mb: number };
 };
 
-export default function Setup({ app, provider, limits }: Props) {
+export default function Setup({ app, provider, server, limits }: Props) {
     return (
         <AppLayout title={`Set up ${app.name}`}>
             <PageHeader
@@ -35,8 +37,10 @@ export default function Setup({ app, provider, limits }: Props) {
                 ) : (
                     <UploadStep app={app} maxMb={limits.max_archive_mb} />
                 )
-            ) : (
+            ) : app.setup_step === 'settings' ? (
                 <SettingsStep app={app} />
+            ) : (
+                <DomainStep app={app} server={server} />
             )}
         </AppLayout>
     );
@@ -346,7 +350,7 @@ function SettingsStep({ app }: { app: AppSetup }) {
 
     const submit = (event: FormEvent) => {
         event.preventDefault();
-        form.post(AppSetupController.finish(app.slug).url);
+        form.post(AppSetupController.settings(app.slug).url);
     };
 
     return (
@@ -431,7 +435,7 @@ function SettingsStep({ app }: { app: AppSetup }) {
             </Card>
             <div className="flex flex-wrap gap-2">
                 <Button type="submit" loading={form.processing}>
-                    Create and deploy
+                    Continue
                 </Button>
                 <Button
                     variant="ghost"
@@ -443,5 +447,58 @@ function SettingsStep({ app }: { app: AppSetup }) {
                 </Button>
             </div>
         </form>
+    );
+}
+
+function DomainStep({ app, server }: { app: AppSetup; server: ServerAddress }) {
+    const [busy, setBusy] = useState(false);
+    const hasDomains = app.domains.length > 0;
+
+    return (
+        <div className="space-y-6">
+            <Card
+                title="4. Domain"
+                description="Optional: point a domain at this app. You can also do it after the first deployment; the app is reachable only through its domains."
+            >
+                {!server.ipv4 && !server.ipv6 && (
+                    <Alert variant="warning">
+                        The server address is not set yet, so the DNS records
+                        cannot be shown. Set it on the Domains page, or add the
+                        domain later.
+                    </Alert>
+                )}
+                <p className="text-sm text-base-content/70">
+                    Add a domain below, create the DNS records it shows, and
+                    CommyPanel connects it and gets a certificate once DNS has
+                    updated. You do not have to wait for that to deploy.
+                </p>
+            </Card>
+            <AppDomains slug={app.slug} domains={app.domains} server={server} />
+            <div className="flex flex-wrap gap-2">
+                <Button
+                    loading={busy}
+                    onClick={() =>
+                        router.post(
+                            AppSetupController.finish(app.slug),
+                            {},
+                            {
+                                onStart: () => setBusy(true),
+                                onFinish: () => setBusy(false),
+                            },
+                        )
+                    }
+                >
+                    {hasDomains ? 'Create and deploy' : 'Skip and deploy'}
+                </Button>
+                <Button
+                    variant="ghost"
+                    onClick={() =>
+                        router.post(AppSetupController.back(app.slug))
+                    }
+                >
+                    Back
+                </Button>
+            </div>
+        </div>
     );
 }

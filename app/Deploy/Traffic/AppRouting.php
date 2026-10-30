@@ -22,10 +22,21 @@ class AppRouting
     public function sync(App $app, ?Deployment $target = null): void
     {
         $live = $target ?? $app->activeDeployment()->first();
-        $domains = array_values(array_map(
-            fn (mixed $name): string => (string) $name,
-            $app->domains()->orderBy('name')->pluck('name')->all(),
-        ));
+        $rows = $app->domains()->orderBy('name')->get();
+        $domains = array_values(array_map(fn (mixed $name): string => (string) $name, $rows->pluck('name')->all()));
+        $redirects = [];
+
+        foreach ($rows as $row) {
+            // A redirect only counts while its target is still one of the app's domains.
+            if ($row->redirect_to !== null && in_array($row->redirect_to, $domains, true)) {
+                $redirects[$row->name] = $row->redirect_to;
+            }
+        }
+
+        // Never leave an app with nothing to serve.
+        if (count($redirects) >= count($domains)) {
+            $redirects = [];
+        }
 
         if ($live === null || $live->host_port === null || $domains === []) {
             $this->host->removeNginxSite($app->slug);
@@ -36,6 +47,6 @@ class AppRouting
         $certificate = $app->certificate()->first();
         $https = $certificate !== null && $certificate->status === CertificateStatus::Active && $certificate->isUsable();
 
-        $this->host->applyNginxSite(new NginxSite($app->slug, $domains, $live->host_port, $https ? $app->slug : null));
+        $this->host->applyNginxSite(new NginxSite($app->slug, $domains, $live->host_port, $https ? $app->slug : null, $redirects));
     }
 }

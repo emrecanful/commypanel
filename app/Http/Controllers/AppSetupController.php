@@ -11,6 +11,7 @@ use App\Deploy\Source\GitUrl;
 use App\Deploy\Source\InvalidArchive;
 use App\Deploy\Source\RepositoryAccessChecker;
 use App\Deploy\Source\UploadStorage;
+use App\Dns\ServerAddress;
 use App\Enums\SetupStep;
 use App\Enums\SourceType;
 use App\Http\Requests\FinishSetupRequest;
@@ -30,12 +31,13 @@ use Inertia\Response;
  */
 class AppSetupController extends Controller
 {
-    public function show(App $app, UploadStorage $uploads): Response|RedirectResponse
+    public function show(App $app, UploadStorage $uploads, ServerAddress $server): Response|RedirectResponse
     {
         if ($app->setup_step === null) {
             return redirect()->route('apps.show', $app);
         }
 
+        $app->load('domains');
         $git = $app->source_type === SourceType::Git;
         $provider = $git ? GitProvider::fromUrl((string) $app->git_url) : null;
 
@@ -53,6 +55,7 @@ class AppSetupController extends Controller
                 'name' => $provider->label(),
                 ...($app->deploy_key_public === null ? ['url' => null, 'steps' => []] : $provider->deployKeyInstructions((string) $app->git_url)),
             ],
+            'server' => ['ipv4' => $server->ipv4(), 'ipv6' => $server->ipv6()],
             'limits' => ['max_archive_mb' => (int) config('commypanel.uploads.max_archive_mb')],
         ]);
     }
@@ -124,13 +127,18 @@ class AppSetupController extends Controller
 
     public function back(App $app): RedirectResponse
     {
-        abort_unless($app->setup_step === SetupStep::Settings, 404);
-        $app->forceFill(['setup_step' => SetupStep::Source])->save();
+        $previous = match ($app->setup_step) {
+            SetupStep::Settings => SetupStep::Source,
+            SetupStep::Domain => SetupStep::Settings,
+            default => abort(404),
+        };
+
+        $app->forceFill(['setup_step' => $previous])->save();
 
         return redirect()->route('apps.setup', $app);
     }
 
-    public function finish(FinishSetupRequest $request, App $app, EnvParser $parser, Deployer $deployer, AuditLogger $audit): RedirectResponse
+    public function settings(FinishSetupRequest $request, App $app, EnvParser $parser): RedirectResponse
     {
         abort_unless($app->setup_step === SetupStep::Settings && $app->source_verified_at !== null, 404);
 
@@ -139,14 +147,23 @@ class AppSetupController extends Controller
         unset($data['env']);
 
         DB::transaction(function () use ($app, $data, $env) {
-            $app->forceFill([...$data, 'setup_step' => null])->save();
+            $app->forceFill([...$data, 'setup_step' => SetupStep::Domain])->save();
 
             foreach ($env['vars'] as $key => $value) {
                 AppEnvVar::query()->updateOrCreate(['app_id' => $app->id, 'key' => $key], ['value' => $value]);
             }
         });
 
-        $audit->record('app.created', null, ['app' => $app->slug, 'env_keys' => count($env['vars'])], $app);
+        return redirect()->route('apps.setup', $app);
+    }
+
+    public function finish(Request $request, App $app, Deployer $deployer, AuditLogger $audit): RedirectResponse
+    {
+        abort_unless($app->setup_step === SetupStep::Domain && $app->source_verified_at !== null, 404);
+
+        $app->forceFill(['setup_step' => null])->save();
+
+        $audit->record('app.created', null, ['app' => $app->slug, 'domains' => $app->domains()->count()], $app);
         $deployment = $deployer->deploy($app->refresh(), $request->user());
 
         return redirect()->route('apps.deployments.show', [$app, $deployment->number])

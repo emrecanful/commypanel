@@ -8,12 +8,14 @@ final readonly class NginxSite
 {
     /**
      * @param  list<string>  $domains
+     * @param  array<string, string>  $redirects  domain => the domain it permanently redirects to
      */
     public function __construct(
         public string $name,
         public array $domains,
         public int $upstreamPort,
         public ?string $certificate = null,
+        public array $redirects = [],
     ) {
         ResourceName::assertValid($name);
 
@@ -29,6 +31,16 @@ final readonly class NginxSite
             if (! filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
                 throw new InvalidArgumentException("Invalid domain [{$domain}].");
             }
+        }
+
+        foreach ($redirects as $from => $to) {
+            if (! in_array($from, $domains, true) || ! in_array($to, $domains, true) || $from === $to || isset($redirects[$to])) {
+                throw new InvalidArgumentException("Invalid redirect [{$from}] to [{$to}].");
+            }
+        }
+
+        if (count($redirects) >= count($domains)) {
+            throw new InvalidArgumentException('An nginx site needs a domain that is not redirected.');
         }
 
         if ($upstreamPort < 1024 || $upstreamPort > 65535) {

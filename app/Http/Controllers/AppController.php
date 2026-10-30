@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Audit\AuditLogger;
 use App\Deploy\DestroyApp;
+use App\Dns\ServerAddress;
 use App\Enums\SetupStep;
 use App\Enums\SourceType;
 use App\Http\Requests\StoreAppRequest;
@@ -52,7 +53,7 @@ class AppController extends Controller
         return redirect()->route('apps.setup', $app);
     }
 
-    public function show(App $app, HttpsSettings $https): Response|RedirectResponse
+    public function show(App $app, HttpsSettings $https, ServerAddress $server): Response|RedirectResponse
     {
         if ($app->setup_step !== null) {
             return redirect()->route('apps.setup', $app);
@@ -66,6 +67,7 @@ class AppController extends Controller
                 ->map(fn ($deployment) => AppPresenter::deployment($deployment))->values(),
             'env_keys' => $app->envVars()->orderBy('key')->pluck('key')->values(),
             'https' => ['enabled' => $https->enabled(), 'staging' => $https->staging()],
+            'server' => ['ipv4' => $server->ipv4(), 'ipv6' => $server->ipv6()],
         ]);
     }
 

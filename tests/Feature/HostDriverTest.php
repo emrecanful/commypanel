@@ -44,6 +44,10 @@ it('rejects invalid names, domains and ports', function (callable $make) {
     'no domains' => [fn () => new NginxSite('demo', [], 20001)],
     'bad domain' => [fn () => new NginxSite('demo', ['bad domain;'], 20001)],
     'bad upstream port' => [fn () => new NginxSite('demo', ['a.example.com'], 99999)],
+    'redirect to an unknown domain' => [fn () => new NginxSite('demo', ['a.example.com', 'b.example.com'], 20001, null, ['a.example.com' => 'c.example.com'])],
+    'redirect to itself' => [fn () => new NginxSite('demo', ['a.example.com', 'b.example.com'], 20001, null, ['a.example.com' => 'a.example.com'])],
+    'redirect chain' => [fn () => new NginxSite('demo', ['a.example.com', 'b.example.com', 'c.example.com'], 20001, null, ['a.example.com' => 'b.example.com', 'b.example.com' => 'c.example.com'])],
+    'everything redirected' => [fn () => new NginxSite('demo', ['a.example.com', 'b.example.com'], 20001, null, ['a.example.com' => 'b.example.com', 'b.example.com' => 'a.example.com'])],
 ]);
 
 it('binds the agent driver only on Linux unless explicitly allowed', function () {

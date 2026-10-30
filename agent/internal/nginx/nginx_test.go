@@ -304,3 +304,64 @@ func TestDryRunNeverAsksNginxForItsVersion(t *testing.T) {
 		t.Errorf("calls=%v conf=%s", run.calls, conf)
 	}
 }
+
+func TestRenderRedirectOverHTTP(t *testing.T) {
+	m, _ := newManager(t, nil, true)
+	conf, err := m.Render(Site{
+		Name: "shop", Domains: []string{"example.com", "www.example.com"}, UpstreamPort: 20001,
+		Redirects: []Redirect{{From: "example.com", To: "www.example.com"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"server_name www.example.com;",
+		"server_name example.com;",
+		"return 301 http://www.example.com$request_uri;",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("config missing %q:\n%s", want, conf)
+		}
+	}
+	if strings.Count(conf, "proxy_pass") != 1 || strings.Contains(conf, "server_name example.com www") {
+		t.Errorf("only the target may proxy:\n%s", conf)
+	}
+}
+
+func TestRenderRedirectOverHTTPS(t *testing.T) {
+	m, _ := newManager(t, nil, true)
+	conf, err := m.Render(Site{
+		Name: "shop", Domains: []string{"example.com", "www.example.com"}, UpstreamPort: 20001, Certificate: "shop",
+		Redirects: []Redirect{{From: "example.com", To: "www.example.com"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One 301 to https for the plain port, one on 443 for the redirected name.
+	if got := strings.Count(conf, "return 301 https://www.example.com$request_uri;"); got != 2 {
+		t.Errorf("want 2 redirects to the https target, got %d:\n%s", got, conf)
+	}
+	if strings.Count(conf, "443 ssl") < 4 { // IPv4 + IPv6, for the app and for the redirect
+		t.Errorf("redirect needs its own TLS server:\n%s", conf)
+	}
+}
+
+func TestRejectsBadRedirects(t *testing.T) {
+	m, _ := newManager(t, nil, true)
+	d := []string{"a.example.com", "b.example.com"}
+	bad := []Site{
+		{Name: "ok", Domains: d, UpstreamPort: 20001, Redirects: []Redirect{{From: "a.example.com", To: "a.example.com"}}},
+		{Name: "ok", Domains: d, UpstreamPort: 20001, Redirects: []Redirect{{From: "a.example.com", To: "c.example.com"}}},
+		{Name: "ok", Domains: d, UpstreamPort: 20001, Redirects: []Redirect{{From: "x.example.com", To: "b.example.com"}}},
+		{Name: "ok", Domains: d, UpstreamPort: 20001, Redirects: []Redirect{{From: "a.example.com", To: "b.example.com;\nx"}}},
+		{Name: "ok", Domains: d, UpstreamPort: 20001, Redirects: []Redirect{{From: "a.example.com", To: "b.example.com"}, {From: "b.example.com", To: "a.example.com"}}},
+		{Name: "ok", Domains: d, UpstreamPort: 20001, Redirects: []Redirect{{From: "a.example.com", To: "b.example.com"}, {From: "a.example.com", To: "b.example.com"}}},
+	}
+	for i, s := range bad {
+		_, err := m.Render(s)
+		var ie *validate.InputError
+		if !errors.As(err, &ie) {
+			t.Errorf("case %d: want *InputError, got %v", i, err)
+		}
+	}
+}

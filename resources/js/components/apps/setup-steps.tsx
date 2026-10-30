@@ -1,7 +1,7 @@
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type Step = 'basics' | 'source' | 'settings';
+type Step = 'basics' | 'source' | 'settings' | 'domain';
 
 /** The horizontal progress header of the app wizard. */
 export function SetupSteps({
@@ -18,6 +18,7 @@ export function SetupSteps({
             label: source === 'upload' ? 'Upload code' : 'Repository access',
         },
         { id: 'settings', label: 'Settings' },
+        { id: 'domain', label: 'Domain' },
     ];
     const index = steps.findIndex((step) => step.id === current);
 

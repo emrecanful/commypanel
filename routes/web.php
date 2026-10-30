@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AppController;
+use App\Http\Controllers\AppDomainController;
 use App\Http\Controllers\AppSetupController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\CertificateController;
@@ -37,6 +38,7 @@ Route::middleware('auth')->group(function () {
         Route::post('setup/upload', [AppSetupController::class, 'upload'])->name('setup.upload');
         Route::post('setup/continue', [AppSetupController::class, 'continue'])->name('setup.continue');
         Route::post('setup/back', [AppSetupController::class, 'back'])->name('setup.back');
+        Route::post('setup/settings', [AppSetupController::class, 'settings'])->name('setup.settings');
         Route::post('setup/finish', [AppSetupController::class, 'finish'])->name('setup.finish');
         Route::delete('setup', [AppSetupController::class, 'cancel'])->name('setup.cancel');
         Route::post('deployments', [DeploymentController::class, 'store'])->name('deployments.store');
@@ -45,12 +47,11 @@ Route::middleware('auth')->group(function () {
         Route::post('env', [EnvVarController::class, 'store'])->name('env.store');
         Route::delete('env/{key}', [EnvVarController::class, 'destroy'])->where('key', '[A-Za-z_][A-Za-z0-9_]*')->name('env.destroy');
         Route::post('deploy-key', [DeployKeyController::class, 'store'])->name('deploy-key.store');
+        Route::post('domains', [AppDomainController::class, 'store'])->name('domains.store');
         Route::post('certificate', [CertificateController::class, 'store'])->name('certificate.store');
     });
 
     Route::get('domains', [DomainController::class, 'index'])->name('domains.index');
-    Route::post('domains', [DomainController::class, 'store'])->name('domains.store');
-    Route::patch('domains/{domain}', [DomainController::class, 'update'])->name('domains.update');
     Route::post('domains/{domain}/check', [DomainController::class, 'check'])->name('domains.check');
     Route::delete('domains/{domain}', [DomainController::class, 'destroy'])->name('domains.destroy');
     Route::put('settings/https', [HttpsController::class, 'update'])->name('settings.https.update');

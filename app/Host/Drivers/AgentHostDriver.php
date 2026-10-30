@@ -46,6 +46,11 @@ class AgentHostDriver implements HostDriver
             'domains' => $site->domains,
             'upstream_port' => $site->upstreamPort,
             'certificate' => $site->certificate,
+            'redirects' => $site->redirects === [] ? null : array_map(
+                fn (string $from, string $to) => ['from' => $from, 'to' => $to],
+                array_keys($site->redirects),
+                array_values($site->redirects),
+            ),
         ], fn ($value) => $value !== null));
     }
 

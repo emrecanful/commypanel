@@ -6,6 +6,8 @@ export type DomainRow = {
     status: DomainStatus;
     status_label: string;
     app: string | null;
+    app_name: string | null;
+    redirect_to: string | null;
     found: { a: string[]; aaaa: string[] };
     problems: string[];
     last_checked_at: string | null;

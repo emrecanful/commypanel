@@ -1,6 +1,7 @@
 <?php
 
 use App\Dns\DnsResolver;
+use App\Dns\PanelDomain;
 use App\Dns\ServerAddress;
 use App\Enums\DeploymentStatus;
 use App\Enums\DomainStatus;
@@ -38,7 +39,7 @@ it('requires login', function () {
     auth()->logout();
 
     $this->get('/domains')->assertRedirect('/login');
-    $this->post('/domains', ['name' => 'a.example.com'])->assertRedirect('/login');
+    $this->post('/apps/shop/domains', ['name' => 'a.example.com'])->assertRedirect('/login');
 });
 
 it('lists domains with status, problems and the server address', function () {
@@ -53,61 +54,48 @@ it('lists domains with status, problems and the server address', function () {
         ->where('domains.0.name', 'old.example.com')
         ->where('domains.0.status', 'misconfigured')
         ->where('domains.0.problems', ['Wrong IP'])
-        ->where('domains.1.status_label', 'connected')
-        ->where('apps.0.slug', 'shop'));
+        ->where('domains.1.status_label', 'connected'));
 });
 
-it('adds a domain, normalises it and checks DNS straight away', function () {
-    $this->post('/domains', ['name' => '  Shop.Example.COM. '])->assertSessionHasNoErrors();
+it('adds a domain to an app, normalises it and checks DNS straight away', function () {
+    App::factory()->create(['slug' => 'shop']);
+
+    $this->post('/apps/shop/domains', ['name' => '  Shop.Example.COM. ', 'redirect' => 'none'])->assertSessionHasNoErrors();
 
     $domain = Domain::query()->firstOrFail();
     expect($domain->name)->toBe('shop.example.com')
+        ->and($domain->app->slug)->toBe('shop')
         ->and($domain->status)->toBe(DomainStatus::Verified)
         ->and($domain->verified_at)->not->toBeNull()
-        ->and($domain->last_checked_at)->not->toBeNull()
         ->and(AuditLog::query()->pluck('action')->all())->toContain('domain.added', 'domain.verified');
 });
 
-it('rejects invalid and duplicate domains', function (string $input) {
-    Domain::query()->create(['name' => 'taken.example.com']);
+it('rejects invalid, duplicate and panel domains', function (string $input) {
+    App::factory()->create(['slug' => 'shop']);
+    $other = App::factory()->create();
+    Domain::query()->create(['name' => 'taken.example.com', 'app_id' => $other->id]);
+    app(PanelDomain::class)->save('panel.example.com');
 
-    $this->post('/domains', ['name' => $input])->assertSessionHasErrors('name');
+    $this->post('/apps/shop/domains', ['name' => $input, 'redirect' => 'none'])->assertSessionHasErrors('name');
 
     expect(Domain::query()->count())->toBe(1);
-})->with(['https://x.example.com', '*.example.com', 'localhost', '203.0.113.7', 'taken.example.com', 'TAKEN.example.com']);
+})->with(['https://x.example.com', '*.example.com', 'localhost', '203.0.113.7', 'taken.example.com', 'TAKEN.example.com', 'panel.example.com']);
 
-it('adds a domain straight onto an app and routes it when the app is live', function () {
+it('routes a new domain at once when the app is live', function () {
     liveApp();
 
-    $this->post('/domains', ['name' => 'shop.example.com', 'app' => 'shop'])->assertSessionHasNoErrors();
+    $this->post('/apps/shop/domains', ['name' => 'shop.example.com', 'redirect' => 'none'])->assertSessionHasNoErrors();
 
     $site = $this->host->sites()['shop'];
     expect($site->domains)->toBe(['shop.example.com'])
         ->and($site->upstreamPort)->toBe(20001);
 });
 
-it('assigns, moves and unassigns a domain, keeping nginx in step', function () {
-    liveApp('shop', 20001);
-    liveApp('blog', 20002);
-    $domain = Domain::query()->create(['name' => 'shop.example.com']);
-
-    $this->patch("/domains/{$domain->id}", ['app' => 'shop'])->assertSessionHasNoErrors();
-    expect($this->host->sites()['shop']->domains)->toBe(['shop.example.com']);
-
-    $this->patch("/domains/{$domain->id}", ['app' => 'blog']);
-    expect($this->host->sites())->toHaveKey('blog')->not->toHaveKey('shop')
-        ->and($this->host->sites()['blog']->upstreamPort)->toBe(20002);
-
-    $this->patch("/domains/{$domain->id}", ['app' => null]);
-    expect($this->host->sites())->toBe([])
-        ->and($domain->fresh()->app_id)->toBeNull();
-});
-
 it('puts every domain of an app into its nginx site', function () {
     $app = liveApp();
     Domain::query()->create(['name' => 'b.example.com', 'app_id' => $app->id]);
 
-    $this->post('/domains', ['name' => 'a.example.com', 'app' => 'shop']);
+    $this->post('/apps/shop/domains', ['name' => 'a.example.com', 'redirect' => 'none']);
 
     expect($this->host->sites()['shop']->domains)->toBe(['a.example.com', 'b.example.com']);
 });
@@ -115,10 +103,65 @@ it('puts every domain of an app into its nginx site', function () {
 it('adds no nginx site for an app that is not live yet', function () {
     App::factory()->create(['slug' => 'shop']);
 
-    $this->post('/domains', ['name' => 'shop.example.com', 'app' => 'shop']);
+    $this->post('/apps/shop/domains', ['name' => 'shop.example.com', 'redirect' => 'none']);
 
     expect($this->host->sites())->toBe([])
         ->and(Domain::query()->first()->app_id)->not->toBeNull();
+});
+
+describe('redirects', function () {
+    it('adds the www name and redirects the bare domain to it', function () {
+        liveApp();
+
+        $this->post('/apps/shop/domains', ['name' => 'example.com', 'redirect' => 'www'])->assertSessionHasNoErrors();
+
+        expect(Domain::query()->orderBy('name')->pluck('redirect_to', 'name')->all())
+            ->toBe(['example.com' => 'www.example.com', 'www.example.com' => null])
+            ->and($this->host->sites()['shop']->redirects)->toBe(['example.com' => 'www.example.com'])
+            ->and($this->host->sites()['shop']->domains)->toBe(['example.com', 'www.example.com']);
+    });
+
+    it('adds the bare domain and redirects www to it', function () {
+        liveApp();
+
+        $this->post('/apps/shop/domains', ['name' => 'www.example.com', 'redirect' => 'apex'])->assertSessionHasNoErrors();
+
+        expect($this->host->sites()['shop']->redirects)->toBe(['www.example.com' => 'example.com']);
+    });
+
+    it('refuses a redirect that does not fit the name', function (string $name, string $mode) {
+        App::factory()->create(['slug' => 'shop']);
+
+        $this->post('/apps/shop/domains', ['name' => $name, 'redirect' => $mode])->assertSessionHasErrors('redirect');
+
+        expect(Domain::query()->count())->toBe(0);
+    })->with([['www.example.com', 'www'], ['example.com', 'apex']]);
+
+    it('refuses when the partner name is already used', function () {
+        $other = App::factory()->create();
+        Domain::query()->create(['name' => 'www.example.com', 'app_id' => $other->id]);
+        App::factory()->create(['slug' => 'shop']);
+
+        $this->post('/apps/shop/domains', ['name' => 'example.com', 'redirect' => 'www'])->assertSessionHasErrors('name');
+
+        expect(Domain::query()->count())->toBe(1);
+    });
+
+    it('lets the redirected name serve again once its target is removed', function () {
+        $app = liveApp();
+        $this->post('/apps/shop/domains', ['name' => 'example.com', 'redirect' => 'www']);
+        $target = Domain::query()->where('name', 'www.example.com')->firstOrFail();
+
+        $this->delete("/domains/{$target->id}");
+
+        expect(Domain::query()->where('name', 'example.com')->first()->redirect_to)->toBeNull()
+            ->and($this->host->sites()['shop']->redirects)->toBe([])
+            ->and($app->domains()->count())->toBe(1);
+    });
+
+    it('is not offered on the global domains page any more', function () {
+        $this->post('/domains', ['name' => 'a.example.com'])->assertStatus(405);
+    });
 });
 
 it('removes a domain and updates nginx', function () {
@@ -159,7 +202,9 @@ it('shows an app its domains', function () {
     Domain::query()->create(['name' => 'shop.example.com', 'app_id' => $app->id, 'status' => DomainStatus::Verified]);
 
     $this->get('/apps/shop')->assertInertia(fn (Assert $page) => $page
-        ->where('app.domains', [['name' => 'shop.example.com', 'status' => 'verified']]));
+        ->where('app.domains.0.name', 'shop.example.com')
+        ->where('app.domains.0.status', 'verified')
+        ->where('server.ipv4', '203.0.113.7'));
 });
 
 describe('server address', function () {

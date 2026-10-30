@@ -4,6 +4,7 @@ namespace App\Presenters;
 
 use App\Models\App;
 use App\Models\Deployment;
+use App\Models\Domain;
 
 /**
  * Shapes models into the arrays the React pages receive. Secrets (env values,
@@ -43,10 +44,26 @@ class AppPresenter
             'cpu_limit' => $app->cpu_limit === null ? null : (float) $app->cpu_limit,
             'deploy_key_public' => $app->deploy_key_public,
             'certificate' => self::certificate($app),
-            'domains' => $app->domains->map(fn ($domain) => [
-                'name' => $domain->name,
-                'status' => $domain->status->value,
-            ])->values()->all(),
+            'domains' => $app->domains->sortBy('name')->map(fn (Domain $domain) => self::domain($domain))->values()->all(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function domain(Domain $domain): array
+    {
+        return [
+            'id' => $domain->id,
+            'name' => $domain->name,
+            'status' => $domain->status->value,
+            'status_label' => $domain->status->label(),
+            'app' => $domain->app?->slug,
+            'app_name' => $domain->app?->name,
+            'redirect_to' => $domain->redirect_to,
+            'found' => ['a' => $domain->last_check['a'] ?? [], 'aaaa' => $domain->last_check['aaaa'] ?? []],
+            'problems' => $domain->last_check['problems'] ?? [],
+            'last_checked_at' => $domain->last_checked_at?->toIso8601String(),
         ];
     }
 

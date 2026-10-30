@@ -4,11 +4,11 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import AppController from '@/actions/App/Http/Controllers/AppController';
 import DeploymentController from '@/actions/App/Http/Controllers/DeploymentController';
-import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import { RuntimeFields, SourceFields } from '@/components/apps/app-fields';
 import type { AppFormData } from '@/components/apps/app-fields';
 import { CertificateCard } from '@/components/apps/certificate-card';
 import { DeleteAppModal } from '@/components/apps/delete-app-modal';
+import { AppDomains } from '@/components/apps/app-domains';
 import { DeployKeyCard } from '@/components/apps/deploy-key-card';
 import { DeploymentsCard } from '@/components/apps/deployments-card';
 import { EnvCard } from '@/components/apps/env-card';
@@ -18,13 +18,14 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
 import AppLayout from '@/layouts/app-layout';
-import type { AppSettings, DeploymentSummary, DomainStatus } from '@/types';
+import type { AppSettings, DeploymentSummary, ServerAddress } from '@/types';
 
 type Props = {
     app: AppSettings;
     deployments: DeploymentSummary[];
     env_keys: string[];
     https: { enabled: boolean; staging: boolean };
+    server: ServerAddress;
 };
 
 function Overview({ app }: { app: AppSettings }) {
@@ -50,45 +51,6 @@ function Overview({ app }: { app: AppSettings }) {
                     </div>
                 ))}
             </dl>
-        </Card>
-    );
-}
-
-function DomainsCard({ app }: { app: AppSettings }) {
-    return (
-        <Card
-            title="Domains"
-            description="Visitors reach this app through these domains."
-            actions={
-                <Link
-                    href={DomainController.index()}
-                    className="btn btn-soft btn-sm"
-                >
-                    Manage
-                </Link>
-            }
-        >
-            {app.domains.length === 0 ? (
-                <p className="text-sm text-base-content/70">
-                    No domain yet. Add one in Domains and assign it to this app.
-                </p>
-            ) : (
-                <ul className="divide-y divide-base-300 rounded-field border border-base-300">
-                    {app.domains.map((domain) => (
-                        <li
-                            key={domain.name}
-                            className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2"
-                        >
-                            <span className="min-w-0 text-sm break-all">
-                                {domain.name}
-                            </span>
-                            <StatusBadge
-                                status={domain.status as DomainStatus}
-                            />
-                        </li>
-                    ))}
-                </ul>
-            )}
         </Card>
     );
 }
@@ -133,7 +95,13 @@ function SettingsCard({ app }: { app: AppSettings }) {
     );
 }
 
-export default function Show({ app, deployments, env_keys, https }: Props) {
+export default function Show({
+    app,
+    deployments,
+    env_keys,
+    https,
+    server,
+}: Props) {
     const { errors } = usePage().props;
     const [deploying, setDeploying] = useState(false);
 
@@ -195,10 +163,14 @@ export default function Show({ app, deployments, env_keys, https }: Props) {
                         deployments={deployments}
                     />
                     <SettingsCard app={app} />
+                    <AppDomains
+                        slug={app.slug}
+                        domains={app.domains}
+                        server={server}
+                    />
                 </div>
                 <div className="min-w-0 space-y-6">
                     <Overview app={app} />
-                    <DomainsCard app={app} />
                     <CertificateCard
                         slug={app.slug}
                         certificate={app.certificate}

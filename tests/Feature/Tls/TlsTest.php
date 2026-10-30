@@ -295,11 +295,10 @@ describe('triggers', function () {
         Queue::assertNothingPushed();
     });
 
-    it('queues a certificate when an already connected domain is assigned', function () {
+    it('queues a certificate when a domain that already points here is added to an app', function () {
         $this->actingAs(User::factory()->create());
-        $domain = Domain::query()->create(['name' => 'shop.example.com', 'status' => DomainStatus::Verified]);
 
-        $this->patch("/domains/{$domain->id}", ['app' => 'shop'])->assertSessionHasNoErrors();
+        $this->post('/apps/shop/domains', ['name' => 'shop.example.com', 'redirect' => 'none'])->assertSessionHasNoErrors();
 
         Queue::assertPushed(IssueAppCertificate::class);
     });

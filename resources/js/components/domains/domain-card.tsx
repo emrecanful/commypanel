@@ -1,12 +1,12 @@
-import { router } from '@inertiajs/react';
+import { Link, router } from '@inertiajs/react';
 import { RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import AppController from '@/actions/App/Http/Controllers/AppController';
 import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
-import { Select } from '@/components/ui/select';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { formatDate } from '@/lib/format';
 import type { DomainRow, ServerAddress } from '@/types';
@@ -14,7 +14,8 @@ import type { DomainRow, ServerAddress } from '@/types';
 type Props = {
     domain: DomainRow;
     server: ServerAddress;
-    apps: { slug: string; name: string }[];
+    /** Link to the app the domain belongs to (the global overview). */
+    showApp?: boolean;
 };
 
 function RecordsTable({
@@ -73,7 +74,7 @@ function RecordsTable({
     );
 }
 
-export function DomainCard({ domain, server, apps }: Props) {
+export function DomainCard({ domain, server, showApp = false }: Props) {
     const [checking, setChecking] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -87,13 +88,6 @@ export function DomainCard({ domain, server, apps }: Props) {
                 onStart: () => setChecking(true),
                 onFinish: () => setChecking(false),
             },
-        );
-
-    const assign = (app: string) =>
-        router.patch(
-            DomainController.update(domain.id),
-            { app: app === '' ? null : app },
-            { preserveScroll: true },
         );
 
     const remove = () =>
@@ -123,18 +117,27 @@ export function DomainCard({ domain, server, apps }: Props) {
                 </div>
             }
         >
-            <Select
-                label="Serves app"
-                value={domain.app ?? ''}
-                onChange={(e) => assign(e.target.value)}
-            >
-                <option value="">Not assigned</option>
-                {apps.map((app) => (
-                    <option key={app.slug} value={app.slug}>
-                        {app.name}
-                    </option>
-                ))}
-            </Select>
+            {(showApp || domain.redirect_to) && (
+                <p className="text-sm text-base-content/70">
+                    {showApp && domain.app && (
+                        <>
+                            Serves{' '}
+                            <Link
+                                href={AppController.show(domain.app)}
+                                className="link link-primary"
+                            >
+                                {domain.app_name ?? domain.app}
+                            </Link>
+                        </>
+                    )}
+                    {showApp && domain.app && domain.redirect_to && '. '}
+                    {domain.redirect_to && (
+                        <>
+                            Redirects to <code>{domain.redirect_to}</code>
+                        </>
+                    )}
+                </p>
+            )}
 
             {domain.problems.length > 0 && (
                 <Alert
