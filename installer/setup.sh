@@ -10,6 +10,7 @@
 #   --no-docker      do not install Docker (you manage it yourself)
 #   --upgrade        require an existing installation
 #   --render-only    write config files below $COMMYPANEL_ROOT and touch nothing else
+#   --verbose        show everything the installer does instead of a progress display
 set -Eeuo pipefail
 
 RELEASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,6 +29,11 @@ LOG_FILE="/var/log/commypanel-install.log"
 UPGRADE_FLAG=0
 RENDER_ONLY=0
 SKIP_DOCKER=0
+VERBOSE=0
+
+# Descriptor 3 is the terminal for the progress display. The installer's own
+# output goes to the log file unless --verbose (or no terminal) is in effect.
+exec 3>&1
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -35,7 +41,8 @@ while [ "$#" -gt 0 ]; do
         --no-docker) SKIP_DOCKER=1; shift ;;
         --upgrade) UPGRADE_FLAG=1; shift ;;
         --render-only) RENDER_ONLY=1; shift ;;
-        -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --verbose) VERBOSE=1; shift ;;
+        -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
     esac
 done
@@ -57,18 +64,167 @@ fi
 
 # ----------------------------------------------------------------- helpers
 
-log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
-die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+# ---------------------------------------------------------------- display
+#
+# Fancy mode (a real terminal, no --verbose): one line per step with a spinner,
+# a progress bar and the elapsed time; all other output goes to the log file,
+# whose tail is shown if something fails. Plain mode (pipes, CI, tests,
+# --verbose): numbered lines, everything printed as it happens.
+
+UI_FANCY=0
+UI_COLOR=0
+UI_UTF=0
+STEP_NO=0
+STEP_TOTAL=8
+STEP_LABEL=""
+STEP_PID=""
+STEP_START=0
+
+ui_init() {
+    if [ -t 3 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ]; then UI_COLOR=1; fi
+    if [ "$UI_COLOR" = 1 ] && [ "$SYSTEM" = 1 ] && [ "$VERBOSE" = 0 ]; then UI_FANCY=1; fi
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *UTF-8*|*utf-8*|*UTF8*|*utf8*) UI_UTF=1 ;;
+    esac
+    if [ "$UI_COLOR" = 1 ]; then
+        C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
+        C_RED=$'\033[1;31m'; C_GREEN=$'\033[1;32m'; C_YELLOW=$'\033[1;33m'; C_BLUE=$'\033[1;34m'
+    else
+        C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""
+    fi
+    if [ "$UI_UTF" = 1 ]; then
+        B_ON="█"; B_OFF="░"; MARK_OK="✔"; MARK_FAIL="✘"; FRAMES=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+    else
+        B_ON="#"; B_OFF="-"; MARK_OK="ok"; MARK_FAIL="FAILED"; FRAMES=('|' '/' '-' '\\')
+    fi
+}
+C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""
+B_ON="#"; B_OFF="-"; MARK_OK="ok"; MARK_FAIL="FAILED"; FRAMES=('|' '/' '-' '\\')
+
+# say FORMAT [ARGS]: a line for the person at the terminal.
+say() {
+    if [ "$UI_FANCY" = 1 ]; then printf "$@" >&3; else printf "$@"; fi
+}
+
+# Messages that must reach the terminal even in fancy mode.
+ui_err() {
+    if [ "$UI_FANCY" = 1 ]; then printf '%s\n' "$*" >&3; else printf '%s\n' "$*" >&2; fi
+}
+
+progress_bar() {
+    local filled=$1 total=$2 width=20 n i=0 out=""
+    n=$(( total > 0 ? filled * width / total : 0 ))
+    while [ "$i" -lt "$width" ]; do
+        if [ "$i" -lt "$n" ]; then out="$out$B_ON"; else out="$out$B_OFF"; fi
+        i=$((i + 1))
+    done
+    printf '%s' "$out"
+}
+
+spinner_loop() {
+    local i=0 frame
+    while :; do
+        frame="${FRAMES[$((i % ${#FRAMES[@]}))]}"
+        printf '\r\033[K  %s%s%s %s%s%s  %s%s %d/%d  %ds%s' \
+            "$C_BLUE" "$frame" "$C_RESET" "$C_BOLD" "$STEP_LABEL" "$C_RESET" \
+            "$C_DIM" "$(progress_bar "$((STEP_NO - 1))" "$STEP_TOTAL")" "$STEP_NO" "$STEP_TOTAL" "$((SECONDS - STEP_START))" "$C_RESET" >&3
+        i=$((i + 1))
+        sleep 0.1
+    done
+}
+
+spinner_stop() {
+    if [ -n "$STEP_PID" ]; then
+        kill "$STEP_PID" 2>/dev/null || true
+        wait "$STEP_PID" 2>/dev/null || true
+        STEP_PID=""
+        printf '\r\033[K' >&3
+    fi
+}
+
+step_start() {
+    STEP_NO=$((STEP_NO + 1))
+    STEP_LABEL=$1
+    STEP_START=$SECONDS
+    if [ "$UI_FANCY" = 1 ]; then
+        printf '\n==> [%d/%d] %s\n' "$STEP_NO" "$STEP_TOTAL" "$STEP_LABEL"
+        spinner_loop &
+        STEP_PID=$!
+        disown "$STEP_PID" 2>/dev/null || true
+    else
+        say '%s[%d/%d]%s %s\n' "$C_BLUE" "$STEP_NO" "$STEP_TOTAL" "$C_RESET" "$STEP_LABEL"
+    fi
+}
+
+step_done() {
+    local took=$((SECONDS - STEP_START))
+    if [ "$UI_FANCY" = 1 ]; then
+        spinner_stop
+        printf '  %s%s%s %s  %s%ds%s\n' "$C_GREEN" "$MARK_OK" "$C_RESET" "$STEP_LABEL" "$C_DIM" "$took" "$C_RESET" >&3
+    fi
+    STEP_LABEL=""
+}
+
+# step "Label" function [args]: run one stage of the installation.
+step() {
+    local label=$1
+    shift
+    step_start "$label"
+    "$@"
+    step_done
+}
+
+banner() {
+    say '\n%sCommyPanel installer%s  %s%s%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$1" "$C_RESET"
+    if [ "$UI_FANCY" = 1 ]; then say '%sFull log: %s%s\n\n' "$C_DIM" "$LOG_FILE" "$C_RESET"; else say '\n'; fi
+}
+
+show_log_tail() {
+    if [ "$UI_FANCY" = 1 ] && [ -f "$LOG_FILE" ]; then
+        printf '\n%sLast lines of the log:%s\n' "$C_DIM" "$C_RESET" >&3
+        tail -n 20 "$LOG_FILE" | sed 's/^/    /' >&3
+        printf '\n' >&3
+    fi
+}
+
+log() {
+    if [ "$UI_FANCY" = 1 ]; then printf '==> %s\n' "$*"; else printf '%s==>%s %s\n' "$C_BLUE" "$C_RESET" "$*"; fi
+}
+warn() {
+    if [ "$UI_FANCY" = 1 ]; then
+        printf 'warning: %s\n' "$*"
+        printf '\r\033[K  %swarning:%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&3
+    else
+        printf '%swarning:%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2
+    fi
+}
+die() {
+    local was_running="$STEP_PID"
+    spinner_stop
+    if [ "$UI_FANCY" = 1 ] && [ -n "$was_running" ]; then
+        printf '  %s%s%s %s\n' "$C_RED" "$MARK_FAIL" "$C_RESET" "$STEP_LABEL" >&3
+    fi
+    ui_err "${C_RED}error:${C_RESET} $*"
+    if [ "$UI_FANCY" = 1 ]; then printf 'error: %s\n' "$*"; fi
+    show_log_tail
+    exit 1
+}
 
 on_error() {
-    local status=$1 line=$2
+    local status=$1 line=$2 was_running="$STEP_PID"
     trap - ERR
-    printf '\033[1;31merror:\033[0m Setup stopped at line %s (exit status %s).\n' "$line" "$status" >&2
-    if [ "$SYSTEM" = 1 ]; then printf 'The full log is in %s\n' "$LOG_FILE" >&2; fi
+    spinner_stop
+    if [ "$UI_FANCY" = 1 ] && [ -n "$was_running" ]; then
+        printf '  %s%s%s %s\n' "$C_RED" "$MARK_FAIL" "$C_RESET" "$STEP_LABEL" >&3
+    fi
+    ui_err "${C_RED}error:${C_RESET} Setup stopped at line $line (exit status $status)."
+    if [ "$UI_FANCY" = 1 ]; then printf 'error: Setup stopped at line %s (exit status %s).\n' "$line" "$status"; fi
+    show_log_tail
+    if [ "$SYSTEM" = 1 ]; then ui_err "The full log is in $LOG_FILE"; fi
     exit "$status"
 }
 trap 'on_error $? $LINENO' ERR
+trap 'spinner_stop' EXIT
 
 # Path below the (test) root.
 p() { printf '%s%s' "$ROOT" "$1"; }
@@ -257,7 +413,7 @@ install_packages() {
     if [ "$SYSTEM" != 1 ]; then return 0; fi
 
     log "Installing packages (nginx, PHP, Git, SQLite tools)"
-    export DEBIAN_FRONTEND=noninteractive
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
     apt-get update -qq
     apt-get install -y -qq --no-install-recommends \
         nginx php-cli php-fpm php-sqlite3 php-mbstring php-xml php-curl php-zip php-intl \
@@ -561,10 +717,56 @@ prune_releases() {
 
 # ---------------------------------------------------------------------- main
 
+# The stages of main(), as functions so each one can be a display step.
+
+packages_and_php() {
+    install_packages
+    detect_php
+}
+
+prepare_system() {
+    create_user_and_dirs
+    detect_address
+    if [ "$UPGRADE" = 1 ]; then
+        stored_addr="$(conf_get SERVER_ADDR)"
+        if [ -n "$stored_addr" ]; then SERVER_ADDR="$stored_addr"; fi
+    fi
+    write_env
+    conf_set PANEL_PORT "$PANEL_PORT"
+    conf_set SERVER_ADDR "$SERVER_ADDR"
+    ensure_panel_certificate
+}
+
+update_databases() {
+    backup_databases
+    migrate_and_cache
+}
+
+# First install: there is nothing to roll back to, so go live now. An upgrade
+# switches the same way and rolls back in confirm_healthy if the panel is unwell.
+go_live() {
+    switch_release
+    start_services
+}
+
+confirm_healthy() {
+    if [ "$UPGRADE" = 0 ]; then
+        wait_until_healthy || die "The panel did not become healthy. Check: systemctl status commypanel-agent nginx php$PHP_VER-fpm"
+    elif ! wait_until_healthy; then
+        rollback "${PREVIOUS_RELEASE:-$RELEASE_DIR}"
+    fi
+}
+
+
 main() {
+    ui_init
     if [ "$SYSTEM" = 1 ]; then
         mkdir -p "$(dirname "$LOG_FILE")"
-        exec > >(tee -a "$LOG_FILE") 2>&1
+        if [ "$UI_FANCY" = 1 ]; then
+            exec >> "$LOG_FILE" 2>&1
+        else
+            exec > >(tee -a "$LOG_FILE") 2>&1
+        fi
     fi
 
     VERSION="$(cat "$RELEASE_DIR/VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
@@ -582,43 +784,23 @@ main() {
     if [ "$UPGRADE" = 1 ]; then
         stored_port="$(conf_get PANEL_PORT)"
         if [ -n "$stored_port" ]; then PANEL_PORT="$stored_port"; fi
-        log "Upgrading CommyPanel to $VERSION"
+        banner "Upgrading to $VERSION"
     else
-        log "Installing CommyPanel $VERSION"
+        banner "Installing $VERSION"
     fi
 
-    preflight
-    install_packages
-    detect_php
+    step "Checking this server" preflight
+    step "Installing packages (nginx, PHP, Git, Docker)" packages_and_php
 
     PREVIOUS_RELEASE=""
     if [ "$SYSTEM" = 1 ] && [ -L "$PREFIX/current" ]; then PREVIOUS_RELEASE="$(readlink -f "$PREFIX/current")"; fi
 
-    create_user_and_dirs
-    detect_address
-    if [ "$UPGRADE" = 1 ]; then
-        stored_addr="$(conf_get SERVER_ADDR)"
-        if [ -n "$stored_addr" ]; then SERVER_ADDR="$stored_addr"; fi
-    fi
-    write_env
-    conf_set PANEL_PORT "$PANEL_PORT"
-    conf_set SERVER_ADDR "$SERVER_ADDR"
-    ensure_panel_certificate
-    prepare_release
-    backup_databases
-    migrate_and_cache
-    install_system_config
-
-    if [ "$UPGRADE" = 0 ]; then
-        # First install: there is nothing to roll back to, so go live now.
-        switch_release
-        start_services
-        wait_until_healthy || die "The panel did not become healthy. Check: systemctl status commypanel-agent nginx php$PHP_VER-fpm"
-    else
-        switch_release
-        start_services
-        if ! wait_until_healthy; then rollback "${PREVIOUS_RELEASE:-$RELEASE_DIR}"; fi
-    fi
+    step "Creating folders and settings" prepare_system
+    step "Unpacking the release" prepare_release
+    step "Backing up and migrating the databases" update_databases
+    step "Configuring nginx and services" install_system_config
+    step "Starting CommyPanel" go_live
+    step "Waiting for the panel to answer" confirm_healthy
     prune_releases
 
     if [ "$SYSTEM" != 1 ]; then
@@ -631,19 +813,18 @@ main() {
     url="$(as_panel commypanel:setup-url 2>/dev/null | grep -Eo 'https?://[^[:space:]]+' | head -n 1 || true)"
 
     if [ "$UPGRADE" = 1 ] && [ -z "$url" ]; then
-        log "CommyPanel is now version $VERSION."
+        say '%s%s CommyPanel is now version %s.%s\n\n' "$C_GREEN" "$MARK_OK" "$VERSION" "$C_RESET"
         return 0
     fi
 
-    printf '\n'
-    printf '\033[1;32mCommyPanel %s is installed.\033[0m\n\n' "$VERSION"
-    printf '  Create your admin account (works once, expires in 1 hour):\n\n    %s\n\n' "${url:-run: sudo commypanel setup-url}"
-    printf '  Your browser will warn about the panel certificate: it is self-signed until you add a panel domain.\n\n'
-    printf '  Open these ports in your firewall: 80, 443 and %s.\n' "$PANEL_PORT"
+    say '\n%s%s CommyPanel %s is installed.%s\n\n' "$C_GREEN" "$MARK_OK" "$VERSION" "$C_RESET"
+    say '  Create your admin account (works once, expires in 1 hour):\n\n    %s%s%s\n\n' "$C_BOLD" "${url:-run: sudo commypanel setup-url}" "$C_RESET"
+    say '  Your browser will warn about the panel certificate: it is self-signed until you add a panel domain.\n\n'
+    say '  Open these ports in your firewall: 80, 443 and %s.\n' "$PANEL_PORT"
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
-        printf '  ufw is active here, so run:  sudo ufw allow 80,443,%s/tcp\n' "$PANEL_PORT"
+        say '  ufw is active here, so run:  sudo ufw allow 80,443,%s/tcp\n' "$PANEL_PORT"
     fi
-    printf '\n  Manage the panel:  sudo commypanel help\n\n'
+    say '\n  Manage the panel:  sudo commypanel help\n\n'
 }
 
 # Tests source this file to call single functions without running an install.

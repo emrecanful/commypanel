@@ -19,7 +19,7 @@ The installer downloads the release, checks its SHA-256 checksum and stops if it
 
 Your browser will warn about the panel's certificate. It is self-signed until you give the panel a domain of its own.
 
-Options: `--panel-port N` to choose another port, `--no-docker` if you manage Docker yourself, `--version X` to install a specific version.
+Options: `--panel-port N` to choose another port, `--no-docker` if you manage Docker yourself, `--version X` to install a specific version, `--verbose` to see everything the installer does instead of the progress display.
 
 ## What it installs
 
@@ -76,6 +76,6 @@ There is no uninstall command yet. Your apps run as Docker containers and keep r
 
 ## Troubleshooting
 
-- The full installer log is in `/var/log/commypanel-install.log`.
+- The full installer log is in `/var/log/commypanel-install.log`. If a step fails, the installer prints the end of it.
 - `sudo commypanel status` shows which service is down; `sudo journalctl -u commypanel-agent -n 50` shows why.
 - "Port 80 is already used by ...": another web server is running. Stop and disable it first.

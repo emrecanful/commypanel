@@ -274,3 +274,37 @@ it('resumes a half-finished install instead of treating it as an upgrade', funct
     expect($setup)->toContain('[ -L "$PREFIX/current" ]')
         ->and($setup)->toContain('first install that stopped half-way');
 });
+
+describe('display', function () {
+    it('shows numbered steps without colour codes when not on a terminal', function () {
+        $result = ($this->setup)();
+
+        expect($result->successful())->toBeTrue()
+            ->and($result->output())->toContain('[1/8] Checking this server')
+            ->toContain('[8/8] Waiting for the panel to answer')
+            ->not->toContain("\033[");
+    });
+
+    it('accepts --verbose', function () {
+        expect(($this->setup)(['--verbose'])->successful())->toBeTrue();
+    });
+
+    it('draws a progress bar that fills with the completed steps', function () {
+        $script = 'export COMMYPANEL_SOURCE_ONLY=1 COMMYPANEL_ROOT='.escapeshellarg($this->root).'; source '.escapeshellarg(base_path('installer/setup.sh')).'; B_ON="#"; B_OFF="-"; progress_bar 0 8; echo; progress_bar 4 8; echo; progress_bar 8 8';
+        $lines = explode("\n", trim(Process::run(['bash', '-c', $script])->output()));
+
+        expect($lines)->toBe([str_repeat('-', 20), str_repeat('#', 10).str_repeat('-', 10), str_repeat('#', 20)]);
+    });
+
+    it('shows the end of the log and the error when a step fails, without hiding anything from the log', function () {
+        $log = $this->root.'/install.log';
+        $script = 'export COMMYPANEL_SOURCE_ONLY=1 COMMYPANEL_ROOT='.escapeshellarg($this->root).'; source '.escapeshellarg(base_path('installer/setup.sh')).'; '
+            .'SYSTEM=1; ui_init; UI_FANCY=1; LOG_FILE='.escapeshellarg($log).'; exec >> "$LOG_FILE" 2>&1; '
+            .'broken() { echo "E: unable to locate package"; false; }; step "Installing" broken';
+        $result = Process::run(['bash', '-c', $script]);
+
+        expect($result->successful())->toBeFalse()
+            ->and($result->output())->toContain('Last lines of the log')->toContain('unable to locate package')
+            ->and(file_get_contents($log))->toContain('unable to locate package');
+    });
+});

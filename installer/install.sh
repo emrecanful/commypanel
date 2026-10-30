@@ -10,6 +10,7 @@
 #   --panel-port N    port for the panel's web interface (default 8443)
 #   --tarball FILE    use a local release tarball instead of downloading
 #   --render-only     only write config files below COMMYPANEL_ROOT (testing)
+#   --verbose         show everything instead of a progress display
 set -Eeuo pipefail
 
 REPO="${COMMYPANEL_REPO:-emrecanful/commypanel}"
@@ -26,9 +27,9 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) VERSION="${2:?--version needs a value}"; shift 2 ;;
         --tarball) TARBALL="${2:?--tarball needs a file}"; shift 2 ;;
-        --upgrade|--render-only|--no-docker) PASSTHROUGH+=("$1"); shift ;;
+        --upgrade|--render-only|--no-docker|--verbose) PASSTHROUGH+=("$1"); shift ;;
         --panel-port) PASSTHROUGH+=("$1" "${2:?--panel-port needs a value}"); shift 2 ;;
-        -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "Unknown option: $1" ;;
     esac
 done
