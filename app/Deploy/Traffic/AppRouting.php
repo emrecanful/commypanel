@@ -2,6 +2,7 @@
 
 namespace App\Deploy\Traffic;
 
+use App\Enums\CertificateStatus;
 use App\Host\Data\NginxSite;
 use App\Host\HostDriver;
 use App\Models\App;
@@ -32,6 +33,9 @@ class AppRouting
             return;
         }
 
-        $this->host->applyNginxSite(new NginxSite($app->slug, $domains, $live->host_port));
+        $certificate = $app->certificate()->first();
+        $https = $certificate !== null && $certificate->status === CertificateStatus::Active && $certificate->isUsable();
+
+        $this->host->applyNginxSite(new NginxSite($app->slug, $domains, $live->host_port, $https ? $app->slug : null));
     }
 }

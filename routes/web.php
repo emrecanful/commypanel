@@ -2,11 +2,13 @@
 
 use App\Http\Controllers\AppController;
 use App\Http\Controllers\AuditLogController;
+use App\Http\Controllers\CertificateController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeployKeyController;
 use App\Http\Controllers\DeploymentController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\EnvVarController;
+use App\Http\Controllers\HttpsController;
 use App\Http\Controllers\ServerAddressController;
 use App\Http\Controllers\SetupController;
 use Illuminate\Support\Facades\Route;
@@ -35,6 +37,7 @@ Route::middleware('auth')->group(function () {
         Route::post('env', [EnvVarController::class, 'store'])->name('env.store');
         Route::delete('env/{key}', [EnvVarController::class, 'destroy'])->where('key', '[A-Za-z_][A-Za-z0-9_]*')->name('env.destroy');
         Route::post('deploy-key', [DeployKeyController::class, 'store'])->name('deploy-key.store');
+        Route::post('certificate', [CertificateController::class, 'store'])->name('certificate.store');
     });
 
     Route::get('domains', [DomainController::class, 'index'])->name('domains.index');
@@ -42,6 +45,7 @@ Route::middleware('auth')->group(function () {
     Route::patch('domains/{domain}', [DomainController::class, 'update'])->name('domains.update');
     Route::post('domains/{domain}/check', [DomainController::class, 'check'])->name('domains.check');
     Route::delete('domains/{domain}', [DomainController::class, 'destroy'])->name('domains.destroy');
+    Route::put('settings/https', [HttpsController::class, 'update'])->name('settings.https.update');
     Route::put('settings/server-address', [ServerAddressController::class, 'update'])->name('settings.server-address.update');
     Route::post('settings/server-address/detect', [ServerAddressController::class, 'detect'])->name('settings.server-address.detect');
 

@@ -18,6 +18,16 @@ export type AppSettings = AppSummary & {
     cpu_limit: number | null;
     deploy_key_public: string | null;
     domains: { name: string; status: string }[];
+    certificate: CertificateSummary | null;
+};
+
+export type CertificateSummary = {
+    status: 'issuing' | 'active' | 'failed';
+    domains: string[];
+    staging: boolean;
+    issued_at: string | null;
+    expires_at: string | null;
+    last_error: string | null;
 };
 
 export type DeploymentStatus =

@@ -112,6 +112,50 @@ server {
 }
 `))
 
+var defaultTmpl = template.Must(template.New("default").Parse(`# Managed by CommyPanel. Do not edit; changes are overwritten.
+# Catches port-80 requests for hosts no app serves, so Let's Encrypt can
+# validate a domain before its app is live. Everything else gets a 404.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root {{.Webroot}};
+    }
+
+    location / {
+        return 404;
+    }
+}
+`))
+
+// EnsureDefaultSite writes the catch-all port-80 site that serves ACME
+// challenges. If nginx rejects it (for example because another default_server
+// exists) the file is removed again and the error returned.
+func (m *Manager) EnsureDefaultSite(ctx context.Context) error {
+	var buf bytes.Buffer
+	if err := defaultTmpl.Execute(&buf, struct{ Webroot string }{filepath.Join(m.cfg.DataDir, "acme-webroot")}); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(m.cfg.DataDir, "acme-webroot"), 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(m.cfg.SitesDir, "00-commypanel-default.conf")
+	previous, readErr := os.ReadFile(path)
+	if readErr == nil && bytes.Equal(previous, buf.Bytes()) {
+		return nil
+	}
+	if err := writeAtomic(path, buf.Bytes()); err != nil {
+		return err
+	}
+	if err := m.testAndReload(ctx); err != nil {
+		m.restore(path, previous, readErr == nil)
+		return err
+	}
+	return nil
+}
+
 // Render returns the nginx config for a validated site.
 func (m *Manager) Render(s Site) (string, error) {
 	if err := s.Validate(); err != nil {

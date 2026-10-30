@@ -9,6 +9,7 @@ use App\Http\Requests\StoreAppRequest;
 use App\Http\Requests\UpdateAppRequest;
 use App\Models\App;
 use App\Presenters\AppPresenter;
+use App\Tls\HttpsSettings;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -43,15 +44,16 @@ class AppController extends Controller
         return redirect()->route('apps.show', $app)->with('status', 'App created. Deploy it when you are ready.');
     }
 
-    public function show(App $app): Response
+    public function show(App $app, HttpsSettings $https): Response
     {
-        $app->load(['activeDeployment', 'latestDeployment', 'domains']);
+        $app->load(['activeDeployment', 'latestDeployment', 'domains', 'certificate']);
 
         return Inertia::render('apps/show', [
             'app' => AppPresenter::settings($app),
             'deployments' => $app->deployments()->latest('number')->limit(15)->get()
                 ->map(fn ($deployment) => AppPresenter::deployment($deployment))->values(),
             'env_keys' => $app->envVars()->orderBy('key')->pluck('key')->values(),
+            'https' => ['enabled' => $https->enabled(), 'staging' => $https->staging()],
         ]);
     }
 

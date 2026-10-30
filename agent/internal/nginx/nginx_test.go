@@ -181,3 +181,56 @@ func TestRemove(t *testing.T) {
 		t.Error("invalid name must be rejected")
 	}
 }
+
+func TestEnsureDefaultSite(t *testing.T) {
+	run := &fakeRunner{}
+	m, _ := newManager(t, run, false)
+
+	if err := m.EnsureDefaultSite(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	conf, err := os.ReadFile(filepath.Join(m.cfg.SitesDir, "00-commypanel-default.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"listen 80 default_server;", "location /.well-known/acme-challenge/", "return 404;", "acme-webroot"} {
+		if !strings.Contains(string(conf), want) {
+			t.Errorf("default site missing %q:\n%s", want, conf)
+		}
+	}
+	if got := strings.Join(run.calls, "|"); got != "nginx -t|nginx -s reload" {
+		t.Errorf("calls = %q", got)
+	}
+
+	// Unchanged content means no second reload.
+	run.calls = nil
+	if err := m.EnsureDefaultSite(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.calls) != 0 {
+		t.Errorf("idempotent call reloaded nginx: %v", run.calls)
+	}
+}
+
+func TestEnsureDefaultSiteIsRemovedWhenNginxRejectsIt(t *testing.T) {
+	m, _ := newManager(t, &fakeRunner{failOn: "test"}, false)
+
+	if err := m.EnsureDefaultSite(context.Background()); err == nil {
+		t.Fatal("want error")
+	}
+	if _, err := os.Stat(filepath.Join(m.cfg.SitesDir, "00-commypanel-default.conf")); !os.IsNotExist(err) {
+		t.Error("a rejected default site must be removed")
+	}
+}
+
+func TestEnsureDefaultSiteInDryRun(t *testing.T) {
+	run := &fakeRunner{}
+	m, _ := newManager(t, run, true)
+
+	if err := m.EnsureDefaultSite(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.calls) != 0 {
+		t.Errorf("dry run executed %v", run.calls)
+	}
+}

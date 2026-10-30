@@ -9,3 +9,5 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('commypanel:check-domains')->everyFiveMinutes()->withoutOverlapping();
+
+Schedule::command('commypanel:renew-certificates')->dailyAt('03:17')->withoutOverlapping();

@@ -28,13 +28,21 @@ const labels: Partial<
 
 type Props = {
     status: AppStatus | DeploymentStatus | DomainStatus;
+    /** Replaces the default wording for this status. */
+    label?: string;
     className?: string;
 };
 
-export function StatusBadge({ status, className }: Props) {
+export function StatusBadge({ status, label, className }: Props) {
     return (
-        <span className={cn('badge-soft badge', styles[status], className)}>
-            {labels[status] ?? status}
+        <span
+            className={cn(
+                'badge-soft badge whitespace-nowrap',
+                styles[status],
+                className,
+            )}
+        >
+            {label ?? labels[status] ?? status}
         </span>
     );
 }

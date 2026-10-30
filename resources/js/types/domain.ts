@@ -12,3 +12,9 @@ export type DomainRow = {
 };
 
 export type ServerAddress = { ipv4: string | null; ipv6: string | null };
+
+export type HttpsSettings = {
+    enabled: boolean;
+    email?: string | null;
+    staging: boolean;
+};

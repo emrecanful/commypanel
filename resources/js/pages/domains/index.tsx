@@ -1,18 +1,20 @@
 import { AddDomainCard } from '@/components/domains/add-domain-card';
+import { HttpsCard } from '@/components/domains/https-card';
 import { DomainCard } from '@/components/domains/domain-card';
 import { ServerAddressCard } from '@/components/domains/server-address-card';
 import { PageHeader } from '@/components/page-header';
 import { Card } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
-import type { DomainRow, ServerAddress } from '@/types';
+import type { DomainRow, HttpsSettings, ServerAddress } from '@/types';
 
 type Props = {
     server: ServerAddress;
+    https: HttpsSettings;
     domains: DomainRow[];
     apps: { slug: string; name: string }[];
 };
 
-export default function Index({ server, domains, apps }: Props) {
+export default function Index({ server, https, domains, apps }: Props) {
     return (
         <AppLayout title="Domains">
             <PageHeader
@@ -24,6 +26,7 @@ export default function Index({ server, domains, apps }: Props) {
                 <ServerAddressCard server={server} />
                 <AddDomainCard apps={apps} />
             </div>
+            <HttpsCard https={https} />
 
             {domains.length === 0 ? (
                 <Card

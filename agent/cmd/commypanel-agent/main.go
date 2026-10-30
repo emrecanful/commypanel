@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"commypanel/agent/internal/certs"
 	"commypanel/agent/internal/docker"
 	"commypanel/agent/internal/nginx"
 	"commypanel/agent/internal/server"
@@ -90,7 +91,8 @@ func run() error {
 		DefaultMemoryMB: *defMemory, DefaultCPUs: *defCPUs,
 		BuildMemoryMB: *buildMem, BuildCPUs: *buildCPUs,
 	}, docker.NewUnixEngine(*dockerSock))
-	srv := server.New(server.Options{Nginx: mgr, Docker: dockerMgr, Authorize: authorize, Version: version, DryRun: *dryRun,
+	certMgr := certs.NewManager(certs.Config{DataDir: *dataDir, DryRun: *dryRun, UserAgent: "commypanel-agent/" + version})
+	srv := server.New(server.Options{Nginx: mgr, Docker: dockerMgr, Certs: certMgr, Authorize: authorize, Version: version, DryRun: *dryRun,
 		System: func() system.Status { return system.Collect(*dataDir) },
 	})
 
@@ -114,6 +116,10 @@ func run() error {
 		defer cancel()
 		_ = httpSrv.Shutdown(shutdown)
 	}()
+
+	if err := mgr.EnsureDefaultSite(ctx); err != nil {
+		slog.Warn("could not install the default port-80 site; certificates for domains without a live app will fail", "err", err)
+	}
 
 	slog.Info("agent listening", "socket", *socket, "version", version, "dry_run", *dryRun)
 	if err := httpSrv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {

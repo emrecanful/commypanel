@@ -2,6 +2,8 @@
 
 namespace App\Host;
 
+use App\Host\Data\CertificateInfo;
+use App\Host\Data\CertificateRequest;
 use App\Host\Data\ContainerInfo;
 use App\Host\Data\ContainerSpec;
 use App\Host\Data\ImageBuildSpec;
@@ -82,4 +84,22 @@ interface HostDriver
      * @throws HostOperationFailed
      */
     public function removeImage(string $tag): void;
+
+    /**
+     * Obtain a certificate from Let's Encrypt (HTTP-01) and store it under the
+     * request's name. Can take a minute or more.
+     *
+     * @throws HostOperationFailed with the CA's explanation when validation fails
+     */
+    public function issueCertificate(CertificateRequest $request): CertificateInfo;
+
+    /**
+     * @throws HostOperationFailed
+     */
+    public function certificateInfo(string $name): ?CertificateInfo;
+
+    /**
+     * @throws HostOperationFailed
+     */
+    public function removeCertificate(string $name): void;
 }

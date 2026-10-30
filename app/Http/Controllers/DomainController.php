@@ -9,6 +9,8 @@ use App\Dns\DomainName;
 use App\Dns\ServerAddress;
 use App\Models\App;
 use App\Models\Domain;
+use App\Tls\HttpsSettings;
+use App\Tls\TlsPlanner;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -17,10 +19,11 @@ use Inertia\Response;
 
 class DomainController extends Controller
 {
-    public function index(ServerAddress $server): Response
+    public function index(ServerAddress $server, HttpsSettings $https): Response
     {
         return Inertia::render('domains/index', [
             'server' => ['ipv4' => $server->ipv4(), 'ipv6' => $server->ipv6()],
+            'https' => ['enabled' => $https->enabled(), 'email' => $https->email(), 'staging' => $https->staging()],
             'domains' => Domain::query()->with('app')->orderBy('name')->get()->map(fn (Domain $domain) => [
                 'id' => $domain->id,
                 'name' => $domain->name,
@@ -38,7 +41,7 @@ class DomainController extends Controller
         ]);
     }
 
-    public function store(Request $request, CheckDomain $check, AppRouting $routing, AuditLogger $audit): RedirectResponse
+    public function store(Request $request, CheckDomain $check, AppRouting $routing, TlsPlanner $tls, AuditLogger $audit): RedirectResponse
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:300'],
@@ -63,12 +66,13 @@ class DomainController extends Controller
 
         if ($app !== null) {
             $routing->sync($app);
+            $tls->ensure($app);
         }
 
         return back()->with('status', "{$name} added. Create the DNS records below, then check again.");
     }
 
-    public function update(Request $request, Domain $domain, AppRouting $routing, AuditLogger $audit): RedirectResponse
+    public function update(Request $request, Domain $domain, AppRouting $routing, TlsPlanner $tls, AuditLogger $audit): RedirectResponse
     {
         $data = $request->validate(['app' => ['nullable', 'string', 'exists:apps,slug']]);
 
@@ -80,6 +84,10 @@ class DomainController extends Controller
 
         foreach (array_filter([$previous, $next]) as $app) {
             $routing->sync($app);
+        }
+
+        if ($next !== null) {
+            $tls->ensure($next);
         }
 
         return back()->with('status', $next === null ? "{$domain->name} is no longer assigned to an app." : "{$domain->name} now points to {$next->name}.");

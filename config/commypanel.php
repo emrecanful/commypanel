@@ -68,4 +68,25 @@ return [
         'git_allow_local' => (bool) env('DEPLOY_GIT_ALLOW_LOCAL', false),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | HTTPS (Let's Encrypt)
+    |--------------------------------------------------------------------------
+    |
+    | Certificates are issued by commypanel-agent using the HTTP-01 challenge.
+    | Outside production the staging CA is the default: its certificates are
+    | not trusted by browsers but it has generous rate limits.
+    |
+    */
+
+    'https' => [
+        'staging' => (bool) env('ACME_STAGING', env('APP_ENV') !== 'production'),
+
+        // Renew when a certificate has fewer than this many days left.
+        'renew_before_days' => (int) env('ACME_RENEW_BEFORE_DAYS', 30),
+
+        // Wait this long before retrying a failed issuance.
+        'retry_after_hours' => (int) env('ACME_RETRY_AFTER_HOURS', 6),
+    ],
+
 ];

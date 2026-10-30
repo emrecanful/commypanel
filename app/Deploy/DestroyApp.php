@@ -43,6 +43,12 @@ class DestroyApp
             $problems[] = "Web server route: {$e->getMessage()}";
         }
 
+        try {
+            $this->host->removeCertificate($app->slug);
+        } catch (HostOperationFailed $e) {
+            $problems[] = "Certificate: {$e->getMessage()}";
+        }
+
         $app->delete();
 
         return $problems;

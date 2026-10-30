@@ -94,6 +94,14 @@ class App extends Model
     }
 
     /**
+     * @return HasOne<Certificate, $this>
+     */
+    public function certificate(): HasOne
+    {
+        return $this->hasOne(Certificate::class);
+    }
+
+    /**
      * @return HasMany<Domain, $this>
      */
     public function domains(): HasMany

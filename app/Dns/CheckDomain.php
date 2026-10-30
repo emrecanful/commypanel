@@ -5,10 +5,15 @@ namespace App\Dns;
 use App\Audit\AuditLogger;
 use App\Enums\DomainStatus;
 use App\Models\Domain;
+use App\Tls\TlsPlanner;
 
 class CheckDomain
 {
-    public function __construct(private readonly DomainVerifier $verifier, private readonly AuditLogger $audit) {}
+    public function __construct(
+        private readonly DomainVerifier $verifier,
+        private readonly AuditLogger $audit,
+        private readonly TlsPlanner $tls,
+    ) {}
 
     public function __invoke(Domain $domain): Domain
     {
@@ -24,6 +29,10 @@ class CheckDomain
 
         if ($before !== DomainStatus::Verified && $check->status === DomainStatus::Verified) {
             $this->audit->record('domain.verified', null, ['domain' => $domain->name], $domain);
+
+            if ($domain->app !== null) {
+                $this->tls->ensure($domain->app);
+            }
         }
 
         return $domain;

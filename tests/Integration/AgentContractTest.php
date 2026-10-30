@@ -1,5 +1,6 @@
 <?php
 
+use App\Host\Data\CertificateRequest;
 use App\Host\Data\ContainerSpec;
 use App\Host\Data\ImageBuildSpec;
 use App\Host\Data\NginxSite;
@@ -103,6 +104,45 @@ it('streams a dry-run build', function () {
 it('rejects a build context outside the builds directory', function () {
     expect(fn () => $this->driver->buildImage(new ImageBuildSpec('commypanel/demo:r1', '/etc')))
         ->toThrow(HostOperationFailed::class, 'outside the allowed directory');
+});
+
+it('issues, reads and removes a certificate in dry-run mode', function () {
+    $info = $this->driver->issueCertificate(new CertificateRequest('shop', ['shop.example.com', 'www.shop.example.com']));
+
+    expect($info->domains)->toBe(['shop.example.com', 'www.shop.example.com'])
+        ->and($info->notAfter->getTimestamp())->toBeGreaterThan(time() + 80 * 86400);
+
+    $key = $this->dir.'/data/certs/shop/privkey.pem';
+    expect($key)->toBeFile()
+        ->and(decoct(fileperms($key) & 0777))->toBe('600')
+        ->and($this->driver->certificateInfo('shop')?->domains)->toBe(['shop.example.com', 'www.shop.example.com']);
+
+    $this->driver->removeCertificate('shop');
+
+    expect($this->driver->certificateInfo('shop'))->toBeNull()
+        ->and($this->dir.'/data/certs/shop')->not->toBeDirectory();
+});
+
+it('renders an HTTPS nginx site that points at the stored certificate', function () {
+    $this->driver->issueCertificate(new CertificateRequest('shop', ['shop.example.com']));
+    $this->driver->applyNginxSite(new NginxSite('shop', ['shop.example.com'], 20001, 'shop'));
+
+    $conf = file_get_contents($this->dir.'/sites/commypanel-shop.conf');
+
+    expect($conf)->toContain('listen 443 ssl;')
+        ->toContain('return 301 https://$host$request_uri;')
+        ->toContain('ssl_certificate '.$this->dir.'/data/certs/shop/fullchain.pem;')
+        ->toContain('ssl_certificate_key '.$this->dir.'/data/certs/shop/privkey.pem;');
+});
+
+it('rejects a certificate request the agent finds invalid', function () {
+    expect(fn () => $this->driver->issueCertificate(new CertificateRequest('shop', ['Not A Domain'])))
+        ->toThrow(HostOperationFailed::class, 'invalid domain');
+});
+
+it('installs the catch-all port 80 site for ACME challenges at start-up', function () {
+    expect($this->dir.'/sites/00-commypanel-default.conf')->toBeFile()
+        ->and(file_get_contents($this->dir.'/sites/00-commypanel-default.conf'))->toContain('default_server');
 });
 
 it('is refused when the caller is not on the allow-list', function () {

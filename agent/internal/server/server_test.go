@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"commypanel/agent/internal/certs"
 	"commypanel/agent/internal/docker"
 	"commypanel/agent/internal/nginx"
 	"commypanel/agent/internal/system"
@@ -268,5 +269,67 @@ func TestRemoveImageRoute(t *testing.T) {
 	}
 	if rec := do(t, s, "POST", "/v1/docker/images/remove", `{"tag":"library/alpine"}`); rec.Code != 400 {
 		t.Errorf("foreign image: %d, want 400", rec.Code)
+	}
+}
+
+type fakeCerts struct {
+	issued  []certs.Request
+	removed []string
+	have    *certs.Info
+	err     error
+}
+
+func (f *fakeCerts) Issue(_ context.Context, r certs.Request) (certs.Info, error) {
+	if !r.AgreeTOS {
+		return certs.Info{}, &validate.InputError{Msg: "agree_tos required"}
+	}
+	f.issued = append(f.issued, r)
+	return certs.Info{Name: r.Name, Domains: r.Domains, Serial: "abc"}, f.err
+}
+func (f *fakeCerts) Info(name string) (*certs.Info, error) { return f.have, f.err }
+func (f *fakeCerts) Remove(name string) error {
+	f.removed = append(f.removed, name)
+	return f.err
+}
+
+func newCertServer(f *fakeCerts) *Server {
+	return New(Options{Nginx: &fakeNginx{}, Certs: f, Authorize: AllowAll()})
+}
+
+func TestIssueCertificateRoute(t *testing.T) {
+	f := &fakeCerts{}
+	rec := do(t, newCertServer(f), "POST", "/v1/certificates/issue",
+		`{"name":"shop","domains":["shop.example.com"],"email":"a@b.co","staging":true,"agree_tos":true}`)
+	if rec.Code != 200 || len(f.issued) != 1 || !f.issued[0].Staging || !strings.Contains(rec.Body.String(), `"serial":"abc"`) {
+		t.Errorf("code=%d issued=%v body=%s", rec.Code, f.issued, rec.Body)
+	}
+}
+
+func TestIssueCertificateRejectsBadInput(t *testing.T) {
+	for name, body := range map[string]string{
+		"no agreement":  `{"name":"shop","domains":["a.example.com"]}`,
+		"unknown field": `{"name":"shop","domains":["a.example.com"],"agree_tos":true,"directory":"http://evil/"}`,
+		"not json":      `x`,
+	} {
+		f := &fakeCerts{}
+		if rec := do(t, newCertServer(f), "POST", "/v1/certificates/issue", body); rec.Code != http.StatusBadRequest || len(f.issued) != 0 {
+			t.Errorf("%s: code=%d issued=%v", name, rec.Code, f.issued)
+		}
+	}
+}
+
+func TestCertificateInfoAndRemove(t *testing.T) {
+	f := &fakeCerts{}
+	s := newCertServer(f)
+
+	if rec := do(t, s, "GET", "/v1/certificates/shop", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("missing: code = %d, want 404", rec.Code)
+	}
+	f.have = &certs.Info{Name: "shop", Domains: []string{"shop.example.com"}}
+	if rec := do(t, s, "GET", "/v1/certificates/shop", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), "shop.example.com") {
+		t.Errorf("info: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(t, s, "DELETE", "/v1/certificates/shop", ""); rec.Code != 200 || f.removed[0] != "shop" {
+		t.Errorf("remove: %d %v", rec.Code, f.removed)
 	}
 }

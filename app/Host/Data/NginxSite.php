@@ -17,6 +17,10 @@ final readonly class NginxSite
     ) {
         ResourceName::assertValid($name);
 
+        if ($certificate !== null) {
+            ResourceName::assertValid($certificate);
+        }
+
         if ($domains === []) {
             throw new InvalidArgumentException('An nginx site needs at least one domain.');
         }

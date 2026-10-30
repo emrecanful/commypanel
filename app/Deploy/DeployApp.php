@@ -16,6 +16,7 @@ use App\Host\Exceptions\HostOperationFailed;
 use App\Host\HostDriver;
 use App\Models\App;
 use App\Models\Deployment;
+use App\Tls\TlsPlanner;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
@@ -36,6 +37,7 @@ class DeployApp
         private readonly TrafficSwitcher $traffic,
         private readonly PortAllocator $ports,
         private readonly AuditLogger $audit,
+        private readonly TlsPlanner $tls,
     ) {}
 
     public function __invoke(Deployment $deployment): void
@@ -65,6 +67,7 @@ class DeployApp
             $app->forceFill(['active_deployment_id' => $deployment->id])->save();
             $deployment->forceFill(['status' => DeploymentStatus::Active, 'finished_at' => now()])->save();
 
+            $this->tls->ensure($app);
             $this->retire($previous, $log);
             $this->pruneImages($app, $log);
 

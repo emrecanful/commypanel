@@ -7,6 +7,7 @@ import DeploymentController from '@/actions/App/Http/Controllers/DeploymentContr
 import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import { RuntimeFields, SourceFields } from '@/components/apps/app-fields';
 import type { AppFormData } from '@/components/apps/app-fields';
+import { CertificateCard } from '@/components/apps/certificate-card';
 import { DeleteAppModal } from '@/components/apps/delete-app-modal';
 import { DeployKeyCard } from '@/components/apps/deploy-key-card';
 import { DeploymentsCard } from '@/components/apps/deployments-card';
@@ -23,6 +24,7 @@ type Props = {
     app: AppSettings;
     deployments: DeploymentSummary[];
     env_keys: string[];
+    https: { enabled: boolean; staging: boolean };
 };
 
 function Overview({ app }: { app: AppSettings }) {
@@ -75,9 +77,9 @@ function DomainsCard({ app }: { app: AppSettings }) {
                     {app.domains.map((domain) => (
                         <li
                             key={domain.name}
-                            className="flex items-center justify-between gap-2 px-3 py-2"
+                            className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2"
                         >
-                            <span className="truncate text-sm">
+                            <span className="min-w-0 text-sm break-all">
                                 {domain.name}
                             </span>
                             <StatusBadge
@@ -131,7 +133,7 @@ function SettingsCard({ app }: { app: AppSettings }) {
     );
 }
 
-export default function Show({ app, deployments, env_keys }: Props) {
+export default function Show({ app, deployments, env_keys, https }: Props) {
     const { errors } = usePage().props;
     const [deploying, setDeploying] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
@@ -185,6 +187,12 @@ export default function Show({ app, deployments, env_keys }: Props) {
                 <div className="min-w-0 space-y-6">
                     <Overview app={app} />
                     <DomainsCard app={app} />
+                    <CertificateCard
+                        slug={app.slug}
+                        certificate={app.certificate}
+                        httpsEnabled={https.enabled}
+                        hasDomains={app.domains.length > 0}
+                    />
                     <EnvCard slug={app.slug} keys={env_keys} />
                     <DeployKeyCard
                         slug={app.slug}

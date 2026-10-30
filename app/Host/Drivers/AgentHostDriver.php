@@ -2,6 +2,8 @@
 
 namespace App\Host\Drivers;
 
+use App\Host\Data\CertificateInfo;
+use App\Host\Data\CertificateRequest;
 use App\Host\Data\ContainerInfo;
 use App\Host\Data\ContainerSpec;
 use App\Host\Data\ImageBuildSpec;
@@ -11,6 +13,7 @@ use App\Host\Data\SystemStatus;
 use App\Host\Exceptions\DockerUnavailable;
 use App\Host\Exceptions\HostOperationFailed;
 use App\Host\HostDriver;
+use DateTimeImmutable;
 use GuzzleHttp\Psr7\FnStream;
 use GuzzleHttp\Psr7\Utils;
 use Illuminate\Http\Client\ConnectionException;
@@ -125,6 +128,54 @@ class AgentHostDriver implements HostDriver
         ResourceName::assertValid($name);
 
         $this->send('delete', "/v1/docker/containers/{$name}");
+    }
+
+    public function issueCertificate(CertificateRequest $request): CertificateInfo
+    {
+        // Issuing waits for Let's Encrypt to validate every domain.
+        $response = $this->request(fn () => $this->client(timeout: 400)->post('/v1/certificates/issue', array_filter([
+            'name' => $request->name,
+            'domains' => $request->domains,
+            'email' => $request->email,
+            'staging' => $request->staging,
+            'agree_tos' => true,
+        ], fn ($value) => $value !== null)));
+
+        return $this->certificateFrom($this->handle($response));
+    }
+
+    public function certificateInfo(string $name): ?CertificateInfo
+    {
+        ResourceName::assertValid($name);
+
+        $response = $this->request(fn () => $this->client()->get("/v1/certificates/{$name}"));
+
+        if ($response->status() === 404) {
+            return null;
+        }
+
+        return $this->certificateFrom($this->handle($response));
+    }
+
+    public function removeCertificate(string $name): void
+    {
+        ResourceName::assertValid($name);
+
+        $this->send('delete', "/v1/certificates/{$name}");
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function certificateFrom(array $data): CertificateInfo
+    {
+        return new CertificateInfo(
+            name: (string) ($data['name'] ?? ''),
+            domains: array_values(array_map('strval', $data['domains'] ?? [])),
+            notBefore: new DateTimeImmutable((string) ($data['not_before'] ?? 'now')),
+            notAfter: new DateTimeImmutable((string) ($data['not_after'] ?? 'now')),
+            issuer: (string) ($data['issuer'] ?? ''),
+        );
     }
 
     public function removeImage(string $tag): void

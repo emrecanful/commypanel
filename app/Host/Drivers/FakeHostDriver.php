@@ -2,6 +2,8 @@
 
 namespace App\Host\Drivers;
 
+use App\Host\Data\CertificateInfo;
+use App\Host\Data\CertificateRequest;
 use App\Host\Data\ContainerInfo;
 use App\Host\Data\ContainerSpec;
 use App\Host\Data\ImageBuildSpec;
@@ -10,6 +12,7 @@ use App\Host\Data\ResourceName;
 use App\Host\Data\SystemStatus;
 use App\Host\Exceptions\HostOperationFailed;
 use App\Host\HostDriver;
+use DateTimeImmutable;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -27,6 +30,9 @@ class FakeHostDriver implements HostDriver
 
     /** @var array<string, ContainerSpec> */
     private array $containers = [];
+
+    /** @var array<string, CertificateInfo> */
+    private array $certificates = [];
 
     public function systemStatus(): SystemStatus
     {
@@ -72,6 +78,39 @@ class FakeHostDriver implements HostDriver
         ResourceName::assertValid($name);
         $this->record('removeContainer', ['name' => $name]);
         unset($this->containers[$name]);
+    }
+
+    public function issueCertificate(CertificateRequest $request): CertificateInfo
+    {
+        $this->record('issueCertificate', ['request' => $request]);
+
+        return $this->certificates[$request->name] = new CertificateInfo(
+            $request->name,
+            $request->domains,
+            new DateTimeImmutable('-1 minute'),
+            new DateTimeImmutable('+90 days'),
+            $request->staging ? '(STAGING) Fake CA' : 'Fake CA',
+        );
+    }
+
+    public function certificateInfo(string $name): ?CertificateInfo
+    {
+        return $this->certificates[$name] ?? null;
+    }
+
+    public function removeCertificate(string $name): void
+    {
+        ResourceName::assertValid($name);
+        $this->record('removeCertificate', ['name' => $name]);
+        unset($this->certificates[$name]);
+    }
+
+    /**
+     * @return array<string, CertificateInfo>
+     */
+    public function certificates(): array
+    {
+        return $this->certificates;
     }
 
     public function removeImage(string $tag): void

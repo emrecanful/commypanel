@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"commypanel/agent/internal/certs"
 	"commypanel/agent/internal/docker"
 	"commypanel/agent/internal/nginx"
 	"commypanel/agent/internal/peercred"
@@ -38,12 +39,20 @@ type Docker interface {
 	RemoveImage(ctx context.Context, tag string) error
 }
 
+// Certificates is the part of the certificate manager the server needs.
+type Certificates interface {
+	Issue(ctx context.Context, r certs.Request) (certs.Info, error)
+	Info(name string) (*certs.Info, error)
+	Remove(name string) error
+}
+
 // Authorizer decides whether the caller of a request may use the agent.
 type Authorizer func(r *http.Request) bool
 
 type Options struct {
 	Nginx     Nginx
 	Docker    Docker
+	Certs     Certificates
 	Authorize Authorizer
 	Version   string
 	DryRun    bool
@@ -60,6 +69,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/status", s.status)
 	mux.HandleFunc("PUT /v1/nginx/sites", s.applySite)
 	mux.HandleFunc("DELETE /v1/nginx/sites/{name}", s.removeSite)
+	mux.HandleFunc("POST /v1/certificates/issue", s.issueCertificate)
+	mux.HandleFunc("GET /v1/certificates/{name}", s.certificateInfo)
+	mux.HandleFunc("DELETE /v1/certificates/{name}", s.removeCertificate)
 	mux.HandleFunc("POST /v1/docker/containers", s.runContainer)
 	mux.HandleFunc("GET /v1/docker/containers", s.listContainers)
 	mux.HandleFunc("POST /v1/docker/containers/{name}/stop", s.stopContainer)
@@ -129,6 +141,36 @@ func (s *Server) applySite(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) removeSite(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, s.opts.Nginx.Remove(r.Context(), r.PathValue("name")))
+}
+
+func (s *Server) issueCertificate(w http.ResponseWriter, r *http.Request) {
+	var req certs.Request
+	if !decode(w, r, &req) {
+		return
+	}
+	info, err := s.opts.Certs.Issue(r.Context(), req)
+	if err != nil {
+		s.respond(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+func (s *Server) certificateInfo(w http.ResponseWriter, r *http.Request) {
+	info, err := s.opts.Certs.Info(r.PathValue("name"))
+	if err != nil {
+		s.respond(w, err)
+		return
+	}
+	if info == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no certificate with that name"})
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+func (s *Server) removeCertificate(w http.ResponseWriter, r *http.Request) {
+	s.respond(w, s.opts.Certs.Remove(r.PathValue("name")))
 }
 
 func (s *Server) runContainer(w http.ResponseWriter, r *http.Request) {

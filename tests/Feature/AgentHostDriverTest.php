@@ -1,5 +1,6 @@
 <?php
 
+use App\Host\Data\CertificateRequest;
 use App\Host\Data\ContainerSpec;
 use App\Host\Data\ImageBuildSpec;
 use App\Host\Data\NginxSite;
@@ -135,4 +136,41 @@ it('lists containers, reads logs and prunes images', function () {
     expect($driver->listContainers()[0]->name)->toBe('demo-1')
         ->and($driver->containerLogs('demo-1', 50))->toBe("hello\n")
         ->and($driver->pruneDanglingImages())->toBe(1234);
+});
+
+it('requests a certificate and maps the answer', function () {
+    Http::fake(['agent/v1/certificates/issue' => Http::response([
+        'name' => 'shop', 'domains' => ['shop.example.com'], 'issuer' => 'R11',
+        'not_before' => '2026-10-30T10:00:00Z', 'not_after' => '2027-01-28T10:00:00Z',
+    ])]);
+
+    $info = agentDriver()->issueCertificate(new CertificateRequest('shop', ['shop.example.com'], 'ops@example.com', true));
+
+    expect($info->domains)->toBe(['shop.example.com'])
+        ->and($info->notAfter->format('Y-m-d'))->toBe('2027-01-28')
+        ->and($info->issuer)->toBe('R11');
+
+    Http::assertSent(fn ($request) => $request->url() === 'http://agent/v1/certificates/issue'
+        && $request->data() === ['name' => 'shop', 'domains' => ['shop.example.com'], 'email' => 'ops@example.com', 'staging' => true, 'agree_tos' => true]);
+});
+
+it('shows the CA\'s reason when a certificate cannot be issued', function () {
+    Http::fake(['agent/*' => Http::response(['error' => 'could not validate shop.example.com: Timeout during connect'], 500)]);
+
+    expect(fn () => agentDriver()->issueCertificate(new CertificateRequest('shop', ['shop.example.com'])))
+        ->toThrow(HostOperationFailed::class, 'Timeout during connect');
+});
+
+it('treats a missing certificate as null', function () {
+    Http::fake(['agent/v1/certificates/shop' => Http::response(['error' => 'no certificate with that name'], 404)]);
+
+    expect(agentDriver()->certificateInfo('shop'))->toBeNull();
+});
+
+it('removes a certificate by name', function () {
+    Http::fake(['agent/*' => Http::response(['ok' => true])]);
+
+    agentDriver()->removeCertificate('shop');
+
+    Http::assertSent(fn ($request) => $request->method() === 'DELETE' && $request->url() === 'http://agent/v1/certificates/shop');
 });

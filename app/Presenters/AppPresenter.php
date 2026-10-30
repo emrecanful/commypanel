@@ -42,6 +42,7 @@ class AppPresenter
             'memory_limit_mb' => $app->memory_limit_mb,
             'cpu_limit' => $app->cpu_limit === null ? null : (float) $app->cpu_limit,
             'deploy_key_public' => $app->deploy_key_public,
+            'certificate' => self::certificate($app),
             'domains' => $app->domains->map(fn ($domain) => [
                 'name' => $domain->name,
                 'status' => $domain->status->value,
@@ -65,6 +66,27 @@ class AppPresenter
             'created_at' => $deployment->created_at?->toIso8601String(),
             'finished_at' => $deployment->finished_at?->toIso8601String(),
             ...($withLog ? ['log' => $deployment->log ?? ''] : []),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function certificate(App $app): ?array
+    {
+        $certificate = $app->certificate;
+
+        if ($certificate === null) {
+            return null;
+        }
+
+        return [
+            'status' => $certificate->status->value,
+            'domains' => $certificate->domains ?? [],
+            'staging' => $certificate->staging,
+            'issued_at' => $certificate->issued_at?->toIso8601String(),
+            'expires_at' => $certificate->expires_at?->toIso8601String(),
+            'last_error' => $certificate->last_error,
         ];
     }
 }
