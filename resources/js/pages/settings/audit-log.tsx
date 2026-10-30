@@ -1,4 +1,5 @@
 import { Link } from '@inertiajs/react';
+import { PageHeader } from '@/components/page-header';
 import { Card } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
 
@@ -20,10 +21,11 @@ type Props = {
 export default function AuditLog({ logs }: Props) {
     return (
         <AppLayout title="Audit log">
-            <Card
+            <PageHeader
                 title="Audit log"
                 description="Security-relevant actions on this panel, newest first."
-            >
+            />
+            <Card flush>
                 <div className="overflow-x-auto">
                     <table className="table">
                         <thead>
@@ -64,7 +66,7 @@ export default function AuditLog({ logs }: Props) {
                     </table>
                 </div>
                 <nav
-                    className="flex flex-wrap gap-1"
+                    className="flex flex-wrap gap-1 border-t border-base-300 p-3"
                     aria-label="Audit log pages"
                 >
                     {logs.links.map((link, index) =>

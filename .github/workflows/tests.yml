@@ -34,5 +34,12 @@ jobs:
       - name: Setup Application
         run: composer setup
 
+      - name: Test the agent
+        working-directory: agent
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test ./...
+
       - name: Run CI Checks
         run: composer ci:check

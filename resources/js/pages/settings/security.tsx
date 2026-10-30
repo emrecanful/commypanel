@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
+import { PageHeader } from '@/components/page-header';
 import AppLayout from '@/layouts/app-layout';
 import { fortify } from '@/lib/fortify';
 
@@ -43,7 +44,7 @@ function PasswordCard() {
 
     return (
         <Card title="Password" description="Use a long, unique password.">
-            <form onSubmit={submit} className="max-w-md space-y-4">
+            <form onSubmit={submit} className="space-y-4">
                 <Input
                     label="Current password"
                     type="password"
@@ -129,7 +130,7 @@ function TwoFactorSetup() {
                     <code className="font-mono">{secret}</code>
                 </p>
             )}
-            <form onSubmit={submit} className="max-w-xs space-y-4">
+            <form onSubmit={submit} className="space-y-4">
                 <Input
                     label="Authentication code"
                     inputMode="numeric"
@@ -169,7 +170,7 @@ function RecoveryCodes() {
                 be used once if you lose your authenticator.
             </p>
             {codes && (
-                <ul className="grid max-w-md gap-1 rounded-box bg-base-200 p-4 font-mono text-sm">
+                <ul className="grid gap-1 rounded-box bg-base-200 p-4 font-mono text-sm">
                     {codes.map((code) => (
                         <li key={code}>{code}</li>
                     ))}
@@ -202,37 +203,43 @@ export default function Security() {
 
     return (
         <AppLayout title="Security">
-            <Card
-                title="Two-factor authentication"
-                description="Adds a second step to every login. Strongly recommended: this panel controls your server."
-            >
-                {auth.twoFactor.enabled ? (
-                    <div className="space-y-4">
-                        <Alert variant="success">
-                            Two-factor authentication is on.
-                        </Alert>
-                        <RecoveryCodes />
-                        <Button
-                            variant="error"
-                            size="sm"
-                            onClick={() => setConfirmDisable(true)}
-                        >
-                            Disable two-factor authentication
-                        </Button>
-                    </div>
-                ) : auth.twoFactor.pending ? (
-                    <TwoFactorSetup />
-                ) : (
-                    <div className="space-y-4">
-                        <Alert variant="warning">
-                            Two-factor authentication is off.
-                        </Alert>
-                        <Button onClick={enable}>Enable</Button>
-                    </div>
-                )}
-            </Card>
+            <PageHeader
+                title="Security"
+                description="Protect your account. Two-factor authentication is optional but strongly recommended."
+            />
+            <div className="grid items-start gap-6 xl:grid-cols-2">
+                <Card
+                    title="Two-factor authentication"
+                    description="Adds a second step to every login. Strongly recommended: this panel controls your server."
+                >
+                    {auth.twoFactor.enabled ? (
+                        <div className="space-y-4">
+                            <Alert variant="success">
+                                Two-factor authentication is on.
+                            </Alert>
+                            <RecoveryCodes />
+                            <Button
+                                variant="error"
+                                size="sm"
+                                onClick={() => setConfirmDisable(true)}
+                            >
+                                Disable two-factor authentication
+                            </Button>
+                        </div>
+                    ) : auth.twoFactor.pending ? (
+                        <TwoFactorSetup />
+                    ) : (
+                        <div className="space-y-4">
+                            <Alert variant="warning">
+                                Two-factor authentication is off.
+                            </Alert>
+                            <Button onClick={enable}>Enable</Button>
+                        </div>
+                    )}
+                </Card>
 
-            <PasswordCard />
+                <PasswordCard />
+            </div>
 
             <Modal
                 open={confirmDisable}

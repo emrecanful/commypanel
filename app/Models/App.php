@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\AppStatus;
+use App\Enums\DeploymentStatus;
 use App\Enums\SourceType;
 use App\Enums\Stack;
 use Database\Factories\AppFactory;
@@ -9,6 +11,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
@@ -56,6 +59,30 @@ class App extends Model
     public function deployments(): HasMany
     {
         return $this->hasMany(Deployment::class);
+    }
+
+    /**
+     * @return HasOne<Deployment, $this>
+     */
+    public function latestDeployment(): HasOne
+    {
+        return $this->hasOne(Deployment::class)->latestOfMany('number');
+    }
+
+    /**
+     * Derived from the loaded latestDeployment relation, so list pages should
+     * eager-load it.
+     */
+    public function status(): AppStatus
+    {
+        $latest = $this->latestDeployment;
+
+        return match (true) {
+            $latest !== null && ! $latest->status->isFinished() => AppStatus::Deploying,
+            $this->active_deployment_id !== null => AppStatus::Running,
+            $latest?->status === DeploymentStatus::Failed => AppStatus::Failed,
+            default => AppStatus::New,
+        };
     }
 
     /**

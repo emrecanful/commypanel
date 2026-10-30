@@ -20,7 +20,7 @@ export function Input({ label, error, hint, className, id, ...props }: Props) {
             </label>
             <input
                 id={inputId}
-                className={cn('input', error && 'is-invalid', className)}
+                className={cn('input w-full', error && 'is-invalid', className)}
                 aria-invalid={error ? true : undefined}
                 aria-describedby={describedBy}
                 {...props}

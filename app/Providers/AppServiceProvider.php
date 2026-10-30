@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Audit\AuditEventSubscriber;
 use App\Audit\AuditLogger;
+use App\Deploy\Health\AssumeHealthyChecker;
 use App\Deploy\Health\HealthChecker;
 use App\Deploy\Health\HttpHealthChecker;
 use App\Deploy\Source\GitSourceFetcher;
@@ -30,7 +31,10 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(AuditLogger::class);
         $this->app->bind(SourceFetcher::class, GitSourceFetcher::class);
-        $this->app->bind(HealthChecker::class, HttpHealthChecker::class);
+        // With the fake host driver no container ever listens, so assume health.
+        $this->app->bind(HealthChecker::class, fn () => config('commypanel.host_driver') === 'fake'
+            ? new AssumeHealthyChecker
+            : new HttpHealthChecker);
         $this->app->bind(TrafficSwitcher::class, NullTrafficSwitcher::class);
 
         $this->app->singleton(HostDriver::class, fn (): HostDriver => match (config('commypanel.host_driver')) {
