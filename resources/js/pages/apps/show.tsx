@@ -1,6 +1,6 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { Rocket, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import AppController from '@/actions/App/Http/Controllers/AppController';
 import DeploymentController from '@/actions/App/Http/Controllers/DeploymentController';
@@ -136,6 +136,18 @@ function SettingsCard({ app }: { app: AppSettings }) {
 export default function Show({ app, deployments, env_keys, https }: Props) {
     const { errors } = usePage().props;
     const [deploying, setDeploying] = useState(false);
+
+    // While a deployment runs, keep the status and the release list fresh.
+    useEffect(() => {
+        if (app.status !== 'deploying') return;
+
+        const timer = setInterval(
+            () => router.reload({ only: ['app', 'deployments'] }),
+            2000,
+        );
+
+        return () => clearInterval(timer);
+    }, [app.status]);
     const [confirmDelete, setConfirmDelete] = useState(false);
 
     const deploy = () =>

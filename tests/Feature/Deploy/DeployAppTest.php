@@ -5,16 +5,19 @@ use App\Deploy\DeploymentFailed;
 use App\Deploy\Health\HealthChecker;
 use App\Deploy\Source\SourceFetcher;
 use App\Deploy\Traffic\TrafficSwitcher;
+use App\Enums\DeploymentStage;
 use App\Enums\DeploymentStatus;
 use App\Enums\Stack;
 use App\Host\Data\ImageBuildSpec;
 use App\Host\Drivers\FakeHostDriver;
 use App\Host\Exceptions\DockerUnavailable;
+use App\Host\Exceptions\HostOperationFailed;
 use App\Host\HostDriver;
 use App\Models\App;
 use App\Models\AppEnvVar;
 use App\Models\AuditLog;
 use App\Models\Deployment;
+use App\Models\User;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Sleep;
 use Tests\Support\FakeHealthChecker;
@@ -270,4 +273,39 @@ it('refuses rollbacks that cannot work', function () {
 
     $first->forceFill(['image_available' => false])->save();
     expect(fn () => $deployer->rollback($app, $first->fresh()))->toThrow(DeploymentFailed::class, 'no longer available');
+});
+
+describe('stages', function () {
+    it('ends at done after a successful deployment', function () {
+        expect(($this->deploy)()->stage)->toBe(DeploymentStage::Done);
+    });
+
+    it('stays on the step that failed', function (string $break, DeploymentStage $expected) {
+        match ($break) {
+            'fetch' => $this->fetcher->files = ['README.md' => 'nothing buildable'],
+            'build' => $this->host->failOn('buildImage'),
+            'start' => $this->host->failOn('runContainer'),
+            'health' => $this->health->healthy = false,
+            'switch' => $this->traffic->throw = new HostOperationFailed('nginx -t failed'),
+        };
+
+        $deployment = ($this->deploy)();
+
+        expect($deployment->status)->toBe(DeploymentStatus::Failed)
+            ->and($deployment->stage)->toBe($expected);
+    })->with([
+        'repository cannot be built' => ['fetch', DeploymentStage::Fetch],
+        'image build fails' => ['build', DeploymentStage::Build],
+        'container does not start' => ['start', DeploymentStage::Start],
+        'health check fails' => ['health', DeploymentStage::Health],
+        'traffic cannot be switched' => ['switch', DeploymentStage::Switch],
+    ]);
+
+    it('reports the stage to the deployment page', function () {
+        $deployment = ($this->deploy)();
+        $this->actingAs(User::factory()->create());
+
+        $this->get("/apps/shop/deployments/{$deployment->number}")
+            ->assertInertia(fn ($page) => $page->where('deployment.stage', 'done'));
+    });
 });

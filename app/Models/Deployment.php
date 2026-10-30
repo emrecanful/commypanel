@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\DeploymentStage;
 use App\Enums\DeploymentStatus;
 use Database\Factories\DeploymentFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,6 +15,7 @@ use Illuminate\Support\Carbon;
  * @property int $app_id
  * @property int $number
  * @property DeploymentStatus $status
+ * @property DeploymentStage|null $stage
  * @property string|null $commit_sha
  * @property string|null $image_tag
  * @property bool $image_available
@@ -36,6 +38,7 @@ class Deployment extends Model
     {
         return [
             'status' => DeploymentStatus::class,
+            'stage' => DeploymentStage::class,
             'image_available' => 'boolean',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',

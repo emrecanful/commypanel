@@ -7,7 +7,7 @@ use App\Audit\AuditLogger;
 use App\Deploy\Health\AssumeHealthyChecker;
 use App\Deploy\Health\HealthChecker;
 use App\Deploy\Health\HttpHealthChecker;
-use App\Deploy\Source\GitSourceFetcher;
+use App\Deploy\Source\CompositeSourceFetcher;
 use App\Deploy\Source\SourceFetcher;
 use App\Deploy\Traffic\NginxTrafficSwitcher;
 use App\Deploy\Traffic\TrafficSwitcher;
@@ -33,7 +33,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(AuditLogger::class);
         $this->app->bind(DnsResolver::class, SystemDnsResolver::class);
-        $this->app->bind(SourceFetcher::class, GitSourceFetcher::class);
+        $this->app->bind(SourceFetcher::class, CompositeSourceFetcher::class);
         // With the fake host driver no container ever listens, so assume health.
         $this->app->bind(HealthChecker::class, fn () => config('commypanel.host_driver') === 'fake'
             ? new AssumeHealthyChecker

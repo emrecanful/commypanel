@@ -2,6 +2,7 @@ import type { AppStatus, DeploymentStatus, DomainStatus } from '@/types';
 import { cn } from '@/lib/utils';
 
 const styles: Record<AppStatus | DeploymentStatus | DomainStatus, string> = {
+    setup: 'badge-warning',
     new: 'badge-neutral',
     deploying: 'badge-info',
     running: 'badge-success',
@@ -21,6 +22,7 @@ const styles: Record<AppStatus | DeploymentStatus | DomainStatus, string> = {
 const labels: Partial<
     Record<AppStatus | DeploymentStatus | DomainStatus, string>
 > = {
+    setup: 'setting up',
     active: 'live',
     verified: 'connected',
     misconfigured: 'needs attention',

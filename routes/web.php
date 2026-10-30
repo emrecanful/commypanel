@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AppController;
+use App\Http\Controllers\AppSetupController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\CertificateController;
 use App\Http\Controllers\DashboardController;
@@ -31,6 +32,13 @@ Route::middleware('auth')->group(function () {
         ->except(['edit']);
 
     Route::scopeBindings()->prefix('apps/{app:slug}')->name('apps.')->group(function () {
+        Route::get('setup', [AppSetupController::class, 'show'])->name('setup');
+        Route::post('setup/check', [AppSetupController::class, 'check'])->name('setup.check');
+        Route::post('setup/upload', [AppSetupController::class, 'upload'])->name('setup.upload');
+        Route::post('setup/continue', [AppSetupController::class, 'continue'])->name('setup.continue');
+        Route::post('setup/back', [AppSetupController::class, 'back'])->name('setup.back');
+        Route::post('setup/finish', [AppSetupController::class, 'finish'])->name('setup.finish');
+        Route::delete('setup', [AppSetupController::class, 'cancel'])->name('setup.cancel');
         Route::post('deployments', [DeploymentController::class, 'store'])->name('deployments.store');
         Route::get('deployments/{deployment:number}', [DeploymentController::class, 'show'])->name('deployments.show');
         Route::post('deployments/{deployment:number}/rollback', [DeploymentController::class, 'rollback'])->name('deployments.rollback');

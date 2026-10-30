@@ -58,6 +58,7 @@ class AppPresenter
         return [
             'number' => $deployment->number,
             'status' => $deployment->status->value,
+            'stage' => $deployment->stage?->value,
             'finished' => $deployment->status->isFinished(),
             'commit' => $deployment->commit_sha === null ? null : substr($deployment->commit_sha, 0, 8),
             'is_rollback' => $deployment->rolled_back_from_id !== null,

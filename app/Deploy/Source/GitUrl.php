@@ -29,4 +29,54 @@ final class GitUrl
             && ! str_starts_with($branch, '-')
             && ! str_contains($branch, '..');
     }
+
+    public static function isSsh(string $url): bool
+    {
+        return str_starts_with($url, 'ssh://') || preg_match('#^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:#', $url) === 1;
+    }
+
+    /**
+     * The host name of a remote URL, or null for local paths.
+     */
+    public static function host(string $url): ?string
+    {
+        if (preg_match('#^(?:https|ssh)://(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+)(?::\d+)?/#', $url, $match) === 1) {
+            return strtolower($match[1]);
+        }
+
+        if (preg_match('#^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):#', $url, $match) === 1) {
+            return strtolower($match[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * The repository path without a leading slash or a trailing ".git", e.g. "acme/shop".
+     */
+    public static function path(string $url): ?string
+    {
+        if (preg_match('#^(?:https|ssh)://(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+(?::\d+)?/(.+)$#', $url, $match) !== 1
+            && preg_match('#^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:(.+)$#', $url, $match) !== 1) {
+            return null;
+        }
+
+        return preg_replace('#(\.git)?/?$#', '', ltrim($match[1], '/'));
+    }
+
+    /**
+     * The SSH form of a repository URL (deploy keys only work over SSH), or
+     * null when it cannot be derived.
+     */
+    public static function toSsh(string $url): ?string
+    {
+        if (self::isSsh($url)) {
+            return $url;
+        }
+
+        $host = self::host($url);
+        $path = self::path($url);
+
+        return $host !== null && $path !== null ? "git@{$host}:{$path}.git" : null;
+    }
 }

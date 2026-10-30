@@ -1,4 +1,30 @@
-export type AppStatus = 'new' | 'deploying' | 'running' | 'failed';
+export type AppStatus = 'setup' | 'new' | 'deploying' | 'running' | 'failed';
+
+export type AppStack = 'dotnet' | 'go' | 'node';
+
+export type SetupStep = 'source' | 'settings';
+
+export type SourceAccess = {
+    state:
+        | 'public'
+        | 'key_required'
+        | 'key_works'
+        | 'branch_missing'
+        | 'unreachable'
+        | 'invalid';
+    message: string;
+    ready: boolean;
+    branches: string[];
+};
+
+export type AppSetup = AppSettings & {
+    setup_step: SetupStep;
+    stack_hint: AppStack | null;
+    source_type: 'git' | 'upload';
+    source_verified: boolean;
+    has_upload: boolean;
+    ssh_url: string | null;
+};
 
 export type AppSummary = {
     slug: string;
@@ -39,9 +65,18 @@ export type DeploymentStatus =
     | 'failed'
     | 'stopped';
 
+export type DeploymentStage =
+    | 'fetch'
+    | 'build'
+    | 'start'
+    | 'health'
+    | 'switch'
+    | 'done';
+
 export type DeploymentSummary = {
     number: number;
     status: DeploymentStatus;
+    stage: DeploymentStage | null;
     finished: boolean;
     commit: string | null;
     is_rollback: boolean;

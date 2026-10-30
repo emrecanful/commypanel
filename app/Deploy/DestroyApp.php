@@ -2,6 +2,7 @@
 
 namespace App\Deploy;
 
+use App\Deploy\Source\UploadStorage;
 use App\Host\Exceptions\HostOperationFailed;
 use App\Host\HostDriver;
 use App\Models\App;
@@ -11,7 +12,7 @@ use App\Models\App;
  */
 class DestroyApp
 {
-    public function __construct(private readonly HostDriver $host) {}
+    public function __construct(private readonly HostDriver $host, private readonly UploadStorage $uploads) {}
 
     /**
      * @return list<string> problems cleaning up the host; the app is deleted regardless
@@ -49,6 +50,7 @@ class DestroyApp
             $problems[] = "Certificate: {$e->getMessage()}";
         }
 
+        $this->uploads->delete($app);
         $app->delete();
 
         return $problems;

@@ -89,4 +89,19 @@ return [
         'retry_after_hours' => (int) env('ACME_RETRY_AFTER_HOURS', 6),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Uploads ("I will upload my project")
+    |--------------------------------------------------------------------------
+    */
+
+    'uploads' => [
+        // Largest accepted archive, in megabytes. nginx and PHP-FPM are configured to match.
+        'max_archive_mb' => (int) env('UPLOAD_MAX_ARCHIVE_MB', 64),
+
+        // Limits on what an archive may unpack to, to stop archive bombs.
+        'max_unpacked_mb' => (int) env('UPLOAD_MAX_UNPACKED_MB', 500),
+        'max_files' => (int) env('UPLOAD_MAX_FILES', 20000),
+    ],
+
 ];

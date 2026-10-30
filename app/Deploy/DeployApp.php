@@ -8,7 +8,9 @@ use App\Deploy\Source\SourceFetcher;
 use App\Deploy\Stacks\DetectionFailed;
 use App\Deploy\Stacks\StackDetector;
 use App\Deploy\Traffic\TrafficSwitcher;
+use App\Enums\DeploymentStage;
 use App\Enums\DeploymentStatus;
+use App\Enums\Stack;
 use App\Host\Data\ContainerSpec;
 use App\Host\Data\ImageBuildSpec;
 use App\Host\Exceptions\DockerUnavailable;
@@ -62,10 +64,11 @@ class DeployApp
             $this->checkHealth($app, $deployment, $log);
 
             $previous = $app->activeDeployment;
+            $this->stage($deployment, DeploymentStage::Switch);
             $log->step('Switching traffic to the new version.');
             $this->traffic->switchTo($deployment);
             $app->forceFill(['active_deployment_id' => $deployment->id])->save();
-            $deployment->forceFill(['status' => DeploymentStatus::Active, 'finished_at' => now()])->save();
+            $deployment->forceFill(['status' => DeploymentStatus::Active, 'stage' => DeploymentStage::Done, 'finished_at' => now()])->save();
 
             $this->tls->ensure($app);
             $this->retire($previous, $log);
@@ -84,6 +87,11 @@ class DeployApp
         }
     }
 
+    private function stage(Deployment $deployment, DeploymentStage $stage): void
+    {
+        $deployment->forceFill(['stage' => $stage])->save();
+    }
+
     private function workDir(App $app, Deployment $deployment): string
     {
         $dir = rtrim((string) config('commypanel.data_path'), '/')."/builds/{$app->slug}-{$deployment->number}";
@@ -96,6 +104,7 @@ class DeployApp
 
     private function build(App $app, Deployment $deployment, string $workDir, DeployLogger $log): void
     {
+        $this->stage($deployment, DeploymentStage::Fetch);
         $log->step("Fetching {$app->git_url} ({$app->git_branch}).");
         $sha = $this->source->fetch($app, $workDir);
         $deployment->forceFill(['commit_sha' => $sha])->save();
@@ -122,10 +131,15 @@ class DeployApp
             }
         }
 
+        if ($app->stack_hint !== null && $plan->stack !== $app->stack_hint && $plan->stack !== Stack::Dockerfile) {
+            throw new DeploymentFailed("You chose {$app->stack_hint->label()}, but this project looks like {$plan->stack->label()}. Change the app type or leave it blank to detect it.");
+        }
+
         $app->forceFill(['stack' => $plan->stack])->save();
 
         $tag = "commypanel/{$app->slug}:{$deployment->number}";
         $deployment->forceFill(['image_tag' => $tag])->save();
+        $this->stage($deployment, DeploymentStage::Build);
         $log->step("Building image {$tag}.");
 
         $this->host->buildImage(new ImageBuildSpec($tag, $workDir, $dockerfile), $log->line(...));
@@ -137,6 +151,7 @@ class DeployApp
         $name = "{$app->slug}-{$deployment->number}";
         $deployment->forceFill(['container_name' => $name])->save();
 
+        $this->stage($deployment, DeploymentStage::Start);
         $log->step("Starting container {$name} on port {$port}.");
 
         $this->host->runContainer(new ContainerSpec(
@@ -155,6 +170,7 @@ class DeployApp
     private function checkHealth(App $app, Deployment $deployment, DeployLogger $log): void
     {
         $timeout = (int) config('commypanel.deploy.health_timeout');
+        $this->stage($deployment, DeploymentStage::Health);
         $log->step("Waiting up to {$timeout}s for {$app->health_path} to answer.");
 
         if ($this->health->waitUntilHealthy((int) $deployment->host_port, $app->health_path, $timeout)) {

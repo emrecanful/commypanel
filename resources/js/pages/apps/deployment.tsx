@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import AppController from '@/actions/App/Http/Controllers/AppController';
 import { PageHeader } from '@/components/page-header';
 import { Alert } from '@/components/ui/alert';
+import { DeploymentStages } from '@/components/apps/deployment-stages';
 import { Card } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
 import AppLayout from '@/layouts/app-layout';
@@ -15,7 +16,8 @@ type Props = {
     deployment: DeploymentDetail;
 };
 
-const POLL_MS = 1500;
+// Fast enough that the log feels live; polling stops as soon as the deployment has finished.
+const POLL_MS = 1000;
 
 function waitingText(status: DeploymentDetail['status']): string {
     return status === 'queued'
@@ -86,21 +88,30 @@ export default function Deployment({ app, deployment }: Props) {
                         </pre>
                     </Card>
                 </div>
-                <Card title="Details">
-                    <dl className="divide-y divide-base-300 text-sm">
-                        {rows.map(([label, value]) => (
-                            <div
-                                key={label}
-                                className="flex justify-between gap-4 py-2"
-                            >
-                                <dt className="text-base-content/70">
-                                    {label}
-                                </dt>
-                                <dd className="font-medium">{value}</dd>
-                            </div>
-                        ))}
-                    </dl>
-                </Card>
+                <div className="min-w-0 space-y-6">
+                    <Card title="Progress">
+                        <DeploymentStages
+                            stage={deployment.stage}
+                            status={deployment.status}
+                            isRollback={deployment.is_rollback}
+                        />
+                    </Card>
+                    <Card title="Details">
+                        <dl className="divide-y divide-base-300 text-sm">
+                            {rows.map(([label, value]) => (
+                                <div
+                                    key={label}
+                                    className="flex justify-between gap-4 py-2"
+                                >
+                                    <dt className="text-base-content/70">
+                                        {label}
+                                    </dt>
+                                    <dd className="font-medium">{value}</dd>
+                                </div>
+                            ))}
+                        </dl>
+                    </Card>
+                </div>
             </div>
         </AppLayout>
     );

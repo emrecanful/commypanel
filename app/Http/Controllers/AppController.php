@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Audit\AuditLogger;
 use App\Deploy\DestroyApp;
+use App\Enums\SetupStep;
 use App\Enums\SourceType;
 use App\Http\Requests\StoreAppRequest;
 use App\Http\Requests\UpdateAppRequest;
@@ -33,19 +34,30 @@ class AppController extends Controller
 
     public function store(StoreAppRequest $request, AuditLogger $audit): RedirectResponse
     {
+        $data = $request->validated();
+        $git = $data['source'] === SourceType::Git->value;
+
         $app = App::query()->create([
-            ...$request->validated(),
-            'slug' => App::generateSlug($request->string('name')->toString()),
-            'source_type' => SourceType::Git,
+            'name' => $data['name'],
+            'slug' => App::generateSlug($data['name']),
+            'stack_hint' => $data['stack_hint'] ?? null,
+            'source_type' => $data['source'],
+            'git_url' => $git ? $data['git_url'] : null,
+            'git_branch' => $git ? $data['git_branch'] : 'main',
+            'setup_step' => SetupStep::Source,
         ]);
 
-        $audit->record('app.created', null, ['app' => $app->slug], $app);
+        $audit->record('app.setup_started', null, ['app' => $app->slug], $app);
 
-        return redirect()->route('apps.show', $app)->with('status', 'App created. Deploy it when you are ready.');
+        return redirect()->route('apps.setup', $app);
     }
 
-    public function show(App $app, HttpsSettings $https): Response
+    public function show(App $app, HttpsSettings $https): Response|RedirectResponse
     {
+        if ($app->setup_step !== null) {
+            return redirect()->route('apps.setup', $app);
+        }
+
         $app->load(['activeDeployment', 'latestDeployment', 'domains', 'certificate']);
 
         return Inertia::render('apps/show', [

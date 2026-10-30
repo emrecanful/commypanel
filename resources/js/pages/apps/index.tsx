@@ -1,6 +1,7 @@
 import { Link } from '@inertiajs/react';
 import { Plus } from 'lucide-react';
 import AppController from '@/actions/App/Http/Controllers/AppController';
+import AppSetupController from '@/actions/App/Http/Controllers/AppSetupController';
 import { PageHeader } from '@/components/page-header';
 import { Card } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -51,9 +52,15 @@ export default function Index({ apps }: Props) {
                                     <tr key={app.slug}>
                                         <td>
                                             <Link
-                                                href={AppController.show(
-                                                    app.slug,
-                                                )}
+                                                href={
+                                                    app.status === 'setup'
+                                                        ? AppSetupController.show(
+                                                              app.slug,
+                                                          )
+                                                        : AppController.show(
+                                                              app.slug,
+                                                          )
+                                                }
                                                 className="link font-medium link-primary"
                                             >
                                                 {app.name}

@@ -1,6 +1,10 @@
 <?php
 
+use App\Enums\AppStatus;
 use App\Enums\DeploymentStatus;
+use App\Enums\SetupStep;
+use App\Enums\SourceType;
+use App\Enums\Stack;
 use App\Host\Drivers\FakeHostDriver;
 use App\Host\Exceptions\HostOperationFailed;
 use App\Host\HostDriver;
@@ -23,6 +27,11 @@ function validAppInput(array $overrides = []): array
     ];
 }
 
+function wizardInput(array $overrides = []): array
+{
+    return ['name' => 'My Shop', 'source' => 'git', 'git_url' => 'https://github.com/acme/shop.git', 'git_branch' => 'main', ...$overrides];
+}
+
 beforeEach(fn () => $this->actingAs(User::factory()->create()));
 
 it('requires login for every app route', function () {
@@ -30,7 +39,7 @@ it('requires login for every app route', function () {
     $app = App::factory()->create();
 
     $this->get('/apps')->assertRedirect('/login');
-    $this->post('/apps', validAppInput())->assertRedirect('/login');
+    $this->post('/apps', wizardInput())->assertRedirect('/login');
     $this->get("/apps/{$app->slug}")->assertRedirect('/login');
     $this->delete("/apps/{$app->slug}")->assertRedirect('/login');
 });
@@ -56,24 +65,57 @@ it('lists apps with their status', function () {
         ->where('apps.3.status', 'deploying'));
 });
 
-it('creates an app with a generated slug and records it', function () {
-    $this->post('/apps', validAppInput())->assertRedirect('/apps/my-shop');
+it('starts a draft app at step 1 with a generated slug and records it', function () {
+    $this->post('/apps', wizardInput())->assertRedirect('/apps/my-shop/setup');
 
     $app = App::query()->firstOrFail();
     expect($app->slug)->toBe('my-shop')
         ->and($app->git_branch)->toBe('main')
-        ->and(AuditLog::query()->where('action', 'app.created')->exists())->toBeTrue();
+        ->and($app->setup_step)->toBe(SetupStep::Source)
+        ->and($app->status())->toBe(AppStatus::Setup)
+        ->and(AuditLog::query()->where('action', 'app.setup_started')->exists())->toBeTrue();
 
-    $this->post('/apps', validAppInput())->assertRedirect('/apps/my-shop-2');
+    $this->post('/apps', wizardInput())->assertRedirect('/apps/my-shop-2/setup');
 });
 
-it('validates app input', function (array $overrides, string $field) {
-    $this->post('/apps', validAppInput($overrides))->assertSessionHasErrors($field);
+it('starts an upload app without a Git address', function () {
+    $this->post('/apps', ['name' => 'Zipped', 'source' => 'upload'])->assertRedirect('/apps/zipped/setup');
+
+    expect(App::query()->firstOrFail())->source_type->toBe(SourceType::Upload)->git_url->toBeNull();
+});
+
+it('keeps the chosen app type as a hint', function () {
+    $this->post('/apps', wizardInput(['stack_hint' => 'go']));
+
+    expect(App::query()->firstOrFail()->stack_hint)->toBe(Stack::Go);
+});
+
+it('validates step 1', function (array $overrides, string $field) {
+    $this->post('/apps', wizardInput($overrides))->assertSessionHasErrors($field);
 
     expect(App::query()->count())->toBe(0);
 })->with([
     'local git path' => [['git_url' => '/etc'], 'git_url'],
     'option injection' => [['git_url' => '--upload-pack=x'], 'git_url'],
+    'missing git url' => [['git_url' => ''], 'git_url'],
+    'bad branch' => [['git_branch' => '-x'], 'git_branch'],
+    'unknown type' => [['stack_hint' => 'cobol'], 'stack_hint'],
+    'unknown source' => [['source' => 'ftp'], 'source'],
+    'missing name' => [['name' => ''], 'name'],
+]);
+
+it('sends a draft app to its setup instead of its page', function () {
+    $app = App::factory()->create(['setup_step' => SetupStep::Source]);
+
+    $this->get("/apps/{$app->slug}")->assertRedirect("/apps/{$app->slug}/setup");
+});
+
+it('validates settings on update', function (array $overrides, string $field) {
+    $app = App::factory()->create();
+
+    $this->patch("/apps/{$app->slug}", validAppInput($overrides))->assertSessionHasErrors($field);
+})->with([
+    'local git path' => [['git_url' => '/etc'], 'git_url'],
     'bad branch' => [['git_branch' => '-x'], 'git_branch'],
     'port too big' => [['container_port' => 70000], 'container_port'],
     'health path without slash' => [['health_path' => 'health'], 'health_path'],

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AppStatus;
 use App\Enums\DeploymentStatus;
+use App\Enums\SetupStep;
 use App\Enums\SourceType;
 use App\Enums\Stack;
 use Database\Factories\AppFactory;
@@ -19,12 +20,15 @@ use Illuminate\Support\Str;
  * @property int $id
  * @property string $name
  * @property string $slug
+ * @property SetupStep|null $setup_step
  * @property Stack|null $stack
+ * @property Stack|null $stack_hint
  * @property SourceType $source_type
  * @property string|null $git_url
  * @property string $git_branch
  * @property string|null $deploy_key_private
  * @property string|null $deploy_key_public
+ * @property Carbon|null $source_verified_at
  * @property int $container_port
  * @property string $health_path
  * @property int|null $memory_limit_mb
@@ -47,7 +51,10 @@ class App extends Model
     protected function casts(): array
     {
         return [
+            'setup_step' => SetupStep::class,
             'stack' => Stack::class,
+            'stack_hint' => Stack::class,
+            'source_verified_at' => 'datetime',
             'source_type' => SourceType::class,
             'deploy_key_private' => 'encrypted',
         ];
@@ -78,6 +85,7 @@ class App extends Model
         $latest = $this->latestDeployment;
 
         return match (true) {
+            $this->setup_step !== null => AppStatus::Setup,
             $latest !== null && ! $latest->status->isFinished() => AppStatus::Deploying,
             $this->active_deployment_id !== null => AppStatus::Running,
             $latest?->status === DeploymentStatus::Failed => AppStatus::Failed,

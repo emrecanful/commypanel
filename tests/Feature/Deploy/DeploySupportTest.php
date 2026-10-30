@@ -4,6 +4,7 @@ use App\Deploy\Deployer;
 use App\Deploy\DeploymentFailed;
 use App\Deploy\Health\HttpHealthChecker;
 use App\Deploy\PortAllocator;
+use App\Deploy\Source\GitRunner;
 use App\Deploy\Source\GitSourceFetcher;
 use App\Deploy\Source\GitUrl;
 use App\Enums\DeploymentStatus;
@@ -85,7 +86,7 @@ describe('git fetcher', function () {
         $app = App::factory()->make(['source_type' => SourceType::Git, 'git_url' => $this->repo, 'git_branch' => 'main']);
         $expected = trim(Process::path($this->repo)->run(['git', 'rev-parse', 'HEAD'])->output());
 
-        $sha = (new GitSourceFetcher)->fetch($app, $this->dir.'/out');
+        $sha = (new GitSourceFetcher(new GitRunner))->fetch($app, $this->dir.'/out');
 
         expect($sha)->toBe($expected)
             ->and($this->dir.'/out/main.go')->toBeFile()
@@ -96,21 +97,21 @@ describe('git fetcher', function () {
         config(['commypanel.deploy.git_allow_local' => true]);
         $app = App::factory()->make(['source_type' => SourceType::Git, 'git_url' => $this->repo, 'git_branch' => 'nope']);
 
-        expect(fn () => (new GitSourceFetcher)->fetch($app, $this->dir.'/out'))
+        expect(fn () => (new GitSourceFetcher(new GitRunner))->fetch($app, $this->dir.'/out'))
             ->toThrow(DeploymentFailed::class, 'Could not fetch the repository');
     });
 
     it('refuses local paths unless enabled', function () {
         $app = App::factory()->make(['source_type' => SourceType::Git, 'git_url' => $this->repo]);
 
-        expect(fn () => (new GitSourceFetcher)->fetch($app, $this->dir.'/out'))
+        expect(fn () => (new GitSourceFetcher(new GitRunner))->fetch($app, $this->dir.'/out'))
             ->toThrow(DeploymentFailed::class, 'not valid');
     });
 
     it('refuses uploads until they are supported', function () {
         $app = App::factory()->make(['source_type' => SourceType::Upload]);
 
-        expect(fn () => (new GitSourceFetcher)->fetch($app, $this->dir.'/out'))
+        expect(fn () => (new GitSourceFetcher(new GitRunner))->fetch($app, $this->dir.'/out'))
             ->toThrow(DeploymentFailed::class, 'Only Git');
     });
 });
