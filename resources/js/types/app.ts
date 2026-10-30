@@ -17,6 +17,7 @@ export type AppSettings = AppSummary & {
     memory_limit_mb: number | null;
     cpu_limit: number | null;
     deploy_key_public: string | null;
+    domains: { name: string; status: string }[];
 };
 
 export type DeploymentStatus =

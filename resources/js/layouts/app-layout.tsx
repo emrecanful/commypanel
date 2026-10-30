@@ -1,6 +1,7 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
     Boxes,
+    Globe,
     ChevronsLeft,
     ChevronsRight,
     LayoutDashboard,
@@ -29,6 +30,7 @@ const NAV: { heading: string; items: NavItem[] }[] = [
         items: [
             { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { href: '/apps', label: 'Apps', icon: Boxes },
+            { href: '/domains', label: 'Domains', icon: Globe },
         ],
     },
     {

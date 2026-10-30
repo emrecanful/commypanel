@@ -45,7 +45,7 @@ class AppController extends Controller
 
     public function show(App $app): Response
     {
-        $app->load(['activeDeployment', 'latestDeployment']);
+        $app->load(['activeDeployment', 'latestDeployment', 'domains']);
 
         return Inertia::render('apps/show', [
             'app' => AppPresenter::settings($app),

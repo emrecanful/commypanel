@@ -37,6 +37,12 @@ class DestroyApp
             }
         }
 
+        try {
+            $this->host->removeNginxSite($app->slug);
+        } catch (HostOperationFailed $e) {
+            $problems[] = "Web server route: {$e->getMessage()}";
+        }
+
         $app->delete();
 
         return $problems;

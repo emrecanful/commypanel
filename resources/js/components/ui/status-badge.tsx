@@ -1,7 +1,7 @@
-import type { AppStatus, DeploymentStatus } from '@/types';
+import type { AppStatus, DeploymentStatus, DomainStatus } from '@/types';
 import { cn } from '@/lib/utils';
 
-const styles: Record<AppStatus | DeploymentStatus, string> = {
+const styles: Record<AppStatus | DeploymentStatus | DomainStatus, string> = {
     new: 'badge-neutral',
     deploying: 'badge-info',
     running: 'badge-success',
@@ -12,13 +12,24 @@ const styles: Record<AppStatus | DeploymentStatus, string> = {
     active: 'badge-success',
     superseded: 'badge-neutral',
     stopped: 'badge-warning',
+    pending: 'badge-neutral',
+    verified: 'badge-success',
+    misconfigured: 'badge-warning',
+    proxied: 'badge-info',
 };
 
-const labels: Partial<Record<AppStatus | DeploymentStatus, string>> = {
+const labels: Partial<
+    Record<AppStatus | DeploymentStatus | DomainStatus, string>
+> = {
     active: 'live',
+    verified: 'connected',
+    misconfigured: 'needs attention',
 };
 
-type Props = { status: AppStatus | DeploymentStatus; className?: string };
+type Props = {
+    status: AppStatus | DeploymentStatus | DomainStatus;
+    className?: string;
+};
 
 export function StatusBadge({ status, className }: Props) {
     return (

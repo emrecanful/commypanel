@@ -1,0 +1,185 @@
+import { router } from '@inertiajs/react';
+import { RefreshCw, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import DomainController from '@/actions/App/Http/Controllers/DomainController';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { ConfirmModal } from '@/components/ui/confirm-modal';
+import { Select } from '@/components/ui/select';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { formatDate } from '@/lib/format';
+import type { DomainRow, ServerAddress } from '@/types';
+
+type Props = {
+    domain: DomainRow;
+    server: ServerAddress;
+    apps: { slug: string; name: string }[];
+};
+
+function RecordsTable({
+    domain,
+    server,
+}: {
+    domain: string;
+    server: ServerAddress;
+}) {
+    const records = [
+        server.ipv4 && { type: 'A', value: server.ipv4 },
+        server.ipv6 && { type: 'AAAA', value: server.ipv6 },
+    ].filter((record) => record !== null && record !== '') as {
+        type: string;
+        value: string;
+    }[];
+
+    if (records.length === 0) return null;
+
+    return (
+        <div className="space-y-2">
+            <p className="text-sm font-medium">
+                Create these records at your DNS provider
+            </p>
+            <div className="overflow-x-auto rounded-field border border-base-300">
+                <table className="table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Name</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {records.map((record) => (
+                            <tr key={record.type}>
+                                <td>
+                                    <code>{record.type}</code>
+                                </td>
+                                <td className="break-all">
+                                    <code>{domain}</code>
+                                </td>
+                                <td>
+                                    <code>{record.value}</code>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+            <p className="text-xs text-base-content/70">
+                Some providers want only the part before your main domain as the
+                name (for example app instead of app.example.com).
+            </p>
+        </div>
+    );
+}
+
+export function DomainCard({ domain, server, apps }: Props) {
+    const [checking, setChecking] = useState(false);
+    const [confirmDelete, setConfirmDelete] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+
+    const check = () =>
+        router.post(
+            DomainController.check(domain.id),
+            {},
+            {
+                preserveScroll: true,
+                onStart: () => setChecking(true),
+                onFinish: () => setChecking(false),
+            },
+        );
+
+    const assign = (app: string) =>
+        router.patch(
+            DomainController.update(domain.id),
+            { app: app === '' ? null : app },
+            { preserveScroll: true },
+        );
+
+    const remove = () =>
+        router.delete(DomainController.destroy(domain.id), {
+            preserveScroll: true,
+            onStart: () => setDeleting(true),
+            onFinish: () => {
+                setDeleting(false);
+                setConfirmDelete(false);
+            },
+        });
+
+    return (
+        <Card
+            title={domain.name}
+            actions={
+                <div className="flex items-center gap-2">
+                    <StatusBadge status={domain.status} />
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Delete ${domain.name}`}
+                        onClick={() => setConfirmDelete(true)}
+                    >
+                        <Trash2 className="size-4" />
+                    </Button>
+                </div>
+            }
+        >
+            <Select
+                label="Serves app"
+                value={domain.app ?? ''}
+                onChange={(e) => assign(e.target.value)}
+            >
+                <option value="">Not assigned</option>
+                {apps.map((app) => (
+                    <option key={app.slug} value={app.slug}>
+                        {app.name}
+                    </option>
+                ))}
+            </Select>
+
+            {domain.problems.length > 0 && (
+                <Alert
+                    variant={domain.status === 'proxied' ? 'info' : 'warning'}
+                >
+                    <ul className="space-y-1">
+                        {domain.problems.map((problem) => (
+                            <li key={problem}>{problem}</li>
+                        ))}
+                    </ul>
+                </Alert>
+            )}
+
+            {domain.status !== 'verified' && (
+                <RecordsTable domain={domain.name} server={server} />
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-base-content/70">
+                    {domain.last_checked_at
+                        ? `Last checked ${formatDate(domain.last_checked_at)}`
+                        : 'Not checked yet'}
+                </p>
+                <Button
+                    variant="soft"
+                    size="sm"
+                    onClick={check}
+                    loading={checking}
+                >
+                    <RefreshCw className="size-4" aria-hidden />
+                    Check DNS
+                </Button>
+            </div>
+
+            <ConfirmModal
+                open={confirmDelete}
+                title={`Remove ${domain.name}?`}
+                confirmLabel="Remove domain"
+                loading={deleting}
+                onConfirm={remove}
+                onClose={() => setConfirmDelete(false)}
+            >
+                The domain stops serving its app. Your DNS records are not
+                touched.
+            </ConfirmModal>
+        </Card>
+    );
+}

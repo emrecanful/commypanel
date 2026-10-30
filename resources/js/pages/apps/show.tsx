@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import AppController from '@/actions/App/Http/Controllers/AppController';
 import DeploymentController from '@/actions/App/Http/Controllers/DeploymentController';
+import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import { RuntimeFields, SourceFields } from '@/components/apps/app-fields';
 import type { AppFormData } from '@/components/apps/app-fields';
 import { DeleteAppModal } from '@/components/apps/delete-app-modal';
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
 import AppLayout from '@/layouts/app-layout';
-import type { AppSettings, DeploymentSummary } from '@/types';
+import type { AppSettings, DeploymentSummary, DomainStatus } from '@/types';
 
 type Props = {
     app: AppSettings;
@@ -47,6 +48,45 @@ function Overview({ app }: { app: AppSettings }) {
                     </div>
                 ))}
             </dl>
+        </Card>
+    );
+}
+
+function DomainsCard({ app }: { app: AppSettings }) {
+    return (
+        <Card
+            title="Domains"
+            description="Visitors reach this app through these domains."
+            actions={
+                <Link
+                    href={DomainController.index()}
+                    className="btn btn-soft btn-sm"
+                >
+                    Manage
+                </Link>
+            }
+        >
+            {app.domains.length === 0 ? (
+                <p className="text-sm text-base-content/70">
+                    No domain yet. Add one in Domains and assign it to this app.
+                </p>
+            ) : (
+                <ul className="divide-y divide-base-300 rounded-field border border-base-300">
+                    {app.domains.map((domain) => (
+                        <li
+                            key={domain.name}
+                            className="flex items-center justify-between gap-2 px-3 py-2"
+                        >
+                            <span className="truncate text-sm">
+                                {domain.name}
+                            </span>
+                            <StatusBadge
+                                status={domain.status as DomainStatus}
+                            />
+                        </li>
+                    ))}
+                </ul>
+            )}
         </Card>
     );
 }
@@ -144,6 +184,7 @@ export default function Show({ app, deployments, env_keys }: Props) {
                 </div>
                 <div className="min-w-0 space-y-6">
                     <Overview app={app} />
+                    <DomainsCard app={app} />
                     <EnvCard slug={app.slug} keys={env_keys} />
                     <DeployKeyCard
                         slug={app.slug}

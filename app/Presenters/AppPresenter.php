@@ -42,6 +42,10 @@ class AppPresenter
             'memory_limit_mb' => $app->memory_limit_mb,
             'cpu_limit' => $app->cpu_limit === null ? null : (float) $app->cpu_limit,
             'deploy_key_public' => $app->deploy_key_public,
+            'domains' => $app->domains->map(fn ($domain) => [
+                'name' => $domain->name,
+                'status' => $domain->status->value,
+            ])->values()->all(),
         ];
     }
 

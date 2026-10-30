@@ -94,6 +94,14 @@ class App extends Model
     }
 
     /**
+     * @return HasMany<Domain, $this>
+     */
+    public function domains(): HasMany
+    {
+        return $this->hasMany(Domain::class);
+    }
+
+    /**
      * @return HasMany<AppEnvVar, $this>
      */
     public function envVars(): HasMany
