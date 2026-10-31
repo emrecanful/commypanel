@@ -16,19 +16,26 @@ class MigrateCommand extends Command
     /**
      * Connection name => migration path (null uses the default path).
      *
+     * The cache database goes first: migrations on the main database (the
+     * permission tables, for one) clear cached values, and on a fresh install
+     * that needs the cache table to exist already.
+     *
      * @var array<string, string|null>
      */
     private const DATABASES = [
-        'main' => null,
-        'queue' => 'database/migrations/queue',
         'cache' => 'database/migrations/cache',
+        'queue' => 'database/migrations/queue',
+        'main' => null,
     ];
 
     public function handle(): int
     {
-        foreach (self::DATABASES as $connection => $path) {
+        // Every file exists before the first migration runs, whatever it touches.
+        foreach (array_keys(self::DATABASES) as $connection) {
             $this->ensureDatabaseFile($connection);
+        }
 
+        foreach (self::DATABASES as $connection => $path) {
             $arguments = ['--database' => $connection, '--force' => (bool) $this->option('force')];
 
             if ($path !== null) {
