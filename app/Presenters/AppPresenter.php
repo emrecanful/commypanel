@@ -3,6 +3,7 @@
 namespace App\Presenters;
 
 use App\Enums\AppStatus;
+use App\Enums\CertificateStatus;
 use App\Enums\DeploymentStatus;
 use App\Models\App;
 use App\Models\Deployment;
@@ -68,6 +69,7 @@ class AppPresenter
             'app' => $domain->app?->slug,
             'app_name' => $domain->app?->name,
             'redirect_to' => $domain->redirect_to,
+            'tls' => self::domainTls($domain),
             'found' => ['a' => $domain->last_check['a'] ?? [], 'aaaa' => $domain->last_check['aaaa'] ?? []],
             'problems' => $domain->last_check['problems'] ?? [],
             'last_checked_at' => $domain->last_checked_at?->toIso8601String(),
@@ -94,6 +96,26 @@ class AppPresenter
             'finished_at' => $deployment->finished_at?->toIso8601String(),
             ...($withLog ? ['log' => $deployment->log ?? ''] : []),
         ];
+    }
+
+    /**
+     * Whether visitors get HTTPS on this domain: secured (on a usable
+     * certificate), pending (being requested), failed, or none.
+     */
+    private static function domainTls(Domain $domain): string
+    {
+        $certificate = $domain->app?->certificate;
+
+        if ($certificate === null || ! in_array($domain->name, $certificate->domains ?? [], true)) {
+            return 'none';
+        }
+
+        return match (true) {
+            $certificate->isUsable() => 'secured',
+            $certificate->status === CertificateStatus::Issuing => 'pending',
+            $certificate->status === CertificateStatus::Failed => 'failed',
+            default => 'none',
+        };
     }
 
     /**

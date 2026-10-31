@@ -3,12 +3,14 @@
 use App\Dns\DnsResolver;
 use App\Dns\PanelDomain;
 use App\Dns\ServerAddress;
+use App\Enums\CertificateStatus;
 use App\Enums\DeploymentStatus;
 use App\Enums\DomainStatus;
 use App\Host\Data\NginxSite;
 use App\Host\HostDriver;
 use App\Models\App;
 use App\Models\AuditLog;
+use App\Models\Certificate;
 use App\Models\Deployment;
 use App\Models\Domain;
 use App\Models\User;
@@ -205,6 +207,67 @@ it('shows an app its domains', function () {
         ->where('app.domains.0.name', 'shop.example.com')
         ->where('app.domains.0.status', 'verified')
         ->where('server.ipv4', '203.0.113.7'));
+});
+
+describe('details', function () {
+    it('shows one domain with its DNS findings, app and certificate state', function () {
+        $app = liveApp();
+        $domain = Domain::query()->create([
+            'name' => 'shop.example.com', 'app_id' => $app->id, 'status' => DomainStatus::Misconfigured,
+            'last_check' => ['a' => ['198.51.100.9'], 'aaaa' => [], 'problems' => ['Wrong IP']],
+        ]);
+        Domain::query()->create(['name' => 'example.com', 'app_id' => $app->id, 'redirect_to' => 'shop.example.com']);
+        Certificate::query()->create([
+            'app_id' => $app->id, 'status' => CertificateStatus::Active, 'domains' => ['shop.example.com'],
+            'issued_at' => now()->subDay(), 'expires_at' => now()->addDays(60),
+        ]);
+
+        $this->get("/domains/{$domain->id}")->assertInertia(fn (Assert $page) => $page
+            ->component('domains/show')
+            ->where('domain.name', 'shop.example.com')
+            ->where('domain.app', 'shop')
+            ->where('domain.tls', 'secured')
+            ->where('domain.found.a', ['198.51.100.9'])
+            ->where('domain.problems', ['Wrong IP'])
+            ->where('certificate.covers_domain', true)
+            ->where('redirected_from', ['example.com'])
+            ->where('server.ipv4', '203.0.113.7'));
+    });
+
+    it('reports HTTPS as none for a domain that is not on the certificate', function () {
+        $app = liveApp();
+        Domain::query()->create(['name' => 'new.example.com', 'app_id' => $app->id]);
+        Certificate::query()->create([
+            'app_id' => $app->id, 'status' => CertificateStatus::Active, 'domains' => ['shop.example.com'],
+            'issued_at' => now()->subDay(), 'expires_at' => now()->addDays(60),
+        ]);
+
+        $this->get('/domains')->assertInertia(fn (Assert $page) => $page
+            ->where('domains.0.tls', 'none'));
+    });
+
+    it('lists the panel domain next to the others', function () {
+        app(PanelDomain::class)->set('panel.example.com');
+
+        $this->get('/domains')->assertInertia(fn (Assert $page) => $page
+            ->where('panel.domain', 'panel.example.com')
+            ->where('panel.certificate', 'none'));
+    });
+
+    it('returns to the list after removing a domain from its own page', function () {
+        $domain = Domain::query()->create(['name' => 'gone.example.com']);
+
+        $this->delete("/domains/{$domain->id}", ['return' => 'domains'])->assertRedirect('/domains');
+
+        expect(Domain::query()->count())->toBe(0);
+    });
+
+    it('requires login', function () {
+        $domain = Domain::query()->create(['name' => 'a.example.com']);
+        auth()->logout();
+
+        $this->get("/domains/{$domain->id}")->assertRedirect('/login');
+    });
 });
 
 describe('server address', function () {

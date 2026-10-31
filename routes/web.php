@@ -65,6 +65,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('welcome/domain', [WelcomeController::class, 'clear'])->name('welcome.clear');
 
     Route::get('domains', [DomainController::class, 'index'])->name('domains.index');
+    Route::get('domains/{domain}', [DomainController::class, 'show'])->name('domains.show');
     Route::post('domains/{domain}/check', [DomainController::class, 'check'])->name('domains.check');
     Route::delete('domains/{domain}', [DomainController::class, 'destroy'])->name('domains.destroy');
     Route::put('settings/https', [HttpsController::class, 'update'])->name('settings.https.update');
