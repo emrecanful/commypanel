@@ -30,3 +30,31 @@ export function timeAgo(iso: string | null): string {
         ? new Date(iso).toLocaleDateString()
         : `${count} ${name}${count === 1 ? '' : 's'} ago`;
 }
+
+/** "1.4 GB", "320 MB". */
+export function formatBytes(bytes: number): string {
+    if (bytes <= 0) return '0 B';
+
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const index = Math.min(
+        Math.floor(Math.log(bytes) / Math.log(1024)),
+        units.length - 1,
+    );
+    const value = bytes / 1024 ** index;
+
+    return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
+}
+
+/** "3 days 4 hours", "12 minutes". */
+export function formatUptime(seconds: number): string {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const part = (n: number, word: string) =>
+        `${n} ${word}${n === 1 ? '' : 's'}`;
+
+    if (days > 0) return `${part(days, 'day')} ${part(hours, 'hour')}`;
+    if (hours > 0) return `${part(hours, 'hour')} ${part(minutes, 'minute')}`;
+
+    return part(minutes, 'minute');
+}

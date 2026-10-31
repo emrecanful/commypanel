@@ -38,3 +38,14 @@ func diskFree(dir string) uint64 {
 	}
 	return 0
 }
+
+// diskUsage returns the total and free bytes of the filesystem holding dir.
+func diskUsage(dir string) (total, free uint64) {
+	for _, path := range []string{dir, "/"} {
+		var st syscall.Statfs_t
+		if err := syscall.Statfs(path, &st); err == nil {
+			return uint64(st.Blocks) * uint64(st.Bsize), uint64(st.Bavail) * uint64(st.Bsize)
+		}
+	}
+	return 0, 0
+}

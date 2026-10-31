@@ -24,6 +24,9 @@ const maxBody = 64 << 10
 type Nginx interface {
 	Apply(ctx context.Context, s nginx.Site) error
 	Remove(ctx context.Context, name string) error
+	Status(ctx context.Context) nginx.Status
+	Test(ctx context.Context) (bool, string)
+	Reload(ctx context.Context) error
 }
 
 // Docker is the part of the Docker manager the server needs.
@@ -37,6 +40,8 @@ type Docker interface {
 	Build(ctx context.Context, s docker.BuildSpec, onLine func(string)) error
 	PruneImages(ctx context.Context) (uint64, error)
 	RemoveImage(ctx context.Context, tag string) error
+	Info(ctx context.Context) (docker.Info, error)
+	ListImages(ctx context.Context) ([]docker.ImageInfo, error)
 }
 
 // Certificates is the part of the certificate manager the server needs.
@@ -57,6 +62,8 @@ type Options struct {
 	Version   string
 	DryRun    bool
 	System    func() system.Status
+	// Info gathers the host facts for the Server page.
+	Info func(ctx context.Context) system.Info
 }
 
 type Server struct{ opts Options }
@@ -67,6 +74,12 @@ func New(opts Options) *Server { return &Server{opts: opts} }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", s.status)
+	mux.HandleFunc("GET /v1/system/info", s.systemInfo)
+	mux.HandleFunc("GET /v1/nginx/status", s.nginxStatus)
+	mux.HandleFunc("POST /v1/nginx/test", s.nginxTest)
+	mux.HandleFunc("POST /v1/nginx/reload", s.nginxReload)
+	mux.HandleFunc("GET /v1/docker/info", s.dockerInfo)
+	mux.HandleFunc("GET /v1/docker/images", s.listImages)
 	mux.HandleFunc("PUT /v1/nginx/sites", s.applySite)
 	mux.HandleFunc("DELETE /v1/nginx/sites/{name}", s.removeSite)
 	mux.HandleFunc("POST /v1/certificates/issue", s.issueCertificate)
@@ -129,6 +142,45 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"docker_available": sys.DockerAvailable,
 		"disk_free_bytes":  sys.DiskFreeBytes,
 	})
+}
+
+func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
+	var info system.Info
+	if s.opts.Info != nil {
+		info = s.opts.Info(r.Context())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": s.opts.Version, "dry_run": s.opts.DryRun, "info": info})
+}
+
+func (s *Server) nginxStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.opts.Nginx.Status(r.Context()))
+}
+
+func (s *Server) nginxTest(w http.ResponseWriter, r *http.Request) {
+	ok, output := s.opts.Nginx.Test(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "output": output})
+}
+
+func (s *Server) nginxReload(w http.ResponseWriter, r *http.Request) {
+	s.respond(w, s.opts.Nginx.Reload(r.Context()))
+}
+
+func (s *Server) dockerInfo(w http.ResponseWriter, r *http.Request) {
+	info, err := s.opts.Docker.Info(r.Context())
+	if err != nil {
+		s.respond(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+func (s *Server) listImages(w http.ResponseWriter, r *http.Request) {
+	images, err := s.opts.Docker.ListImages(r.Context())
+	if err != nil {
+		s.respond(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"images": images})
 }
 
 func (s *Server) applySite(w http.ResponseWriter, r *http.Request) {

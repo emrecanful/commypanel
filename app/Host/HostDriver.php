@@ -6,8 +6,13 @@ use App\Host\Data\CertificateInfo;
 use App\Host\Data\CertificateRequest;
 use App\Host\Data\ContainerInfo;
 use App\Host\Data\ContainerSpec;
+use App\Host\Data\DockerInfo;
+use App\Host\Data\HostInfo;
 use App\Host\Data\ImageBuildSpec;
+use App\Host\Data\ImageInfo;
 use App\Host\Data\NginxSite;
+use App\Host\Data\NginxStatus;
+use App\Host\Data\NginxTestResult;
 use App\Host\Data\SystemStatus;
 use App\Host\Exceptions\DockerUnavailable;
 use App\Host\Exceptions\HostOperationFailed;
@@ -20,6 +25,47 @@ use App\Host\Exceptions\HostOperationFailed;
 interface HostDriver
 {
     public function systemStatus(): SystemStatus;
+
+    /**
+     * Host facts for the Server page: system, memory, disk, service states.
+     *
+     * @throws HostOperationFailed
+     */
+    public function systemInfo(): HostInfo;
+
+    /**
+     * @throws HostOperationFailed when the agent cannot be reached; an
+     *                             unreachable Docker daemon is reported in the result instead
+     */
+    public function dockerInfo(): DockerInfo;
+
+    /**
+     * The images CommyPanel built (the commypanel/ namespace), newest first.
+     *
+     * @return list<ImageInfo>
+     *
+     * @throws HostOperationFailed
+     */
+    public function listImages(): array;
+
+    /**
+     * @throws HostOperationFailed
+     */
+    public function nginxStatus(): NginxStatus;
+
+    /**
+     * Check the nginx configuration without changing anything.
+     *
+     * @throws HostOperationFailed
+     */
+    public function testNginx(): NginxTestResult;
+
+    /**
+     * Test the configuration and reload nginx gracefully.
+     *
+     * @throws HostOperationFailed when the configuration is invalid or the reload fails
+     */
+    public function reloadNginx(): void;
 
     /**
      * Validate, write and gracefully reload an nginx site.

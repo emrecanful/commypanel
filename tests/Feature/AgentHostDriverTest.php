@@ -174,3 +174,66 @@ it('removes a certificate by name', function () {
 
     Http::assertSent(fn ($request) => $request->method() === 'DELETE' && $request->url() === 'http://agent/v1/certificates/shop');
 });
+
+describe('server page data', function () {
+    it('reads host facts, services and the agent version', function () {
+        Http::fake(['agent/*' => Http::response([
+            'version' => '0.2.0',
+            'info' => [
+                'hostname' => 'box', 'os' => 'Debian 13', 'kernel' => '6.8', 'arch' => 'amd64', 'cpus' => 2,
+                'uptime_seconds' => 90, 'load' => [0.5, 0.4, 0.3],
+                'mem_total_bytes' => 2048, 'mem_available_bytes' => 1024, 'disk_total_bytes' => 100, 'disk_free_bytes' => 40,
+                'services' => [['name' => 'nginx', 'state' => 'active'], ['name' => 'docker', 'state' => 'failed']],
+            ],
+        ])]);
+
+        $info = agentDriver()->systemInfo();
+
+        expect($info->hostname)->toBe('box')
+            ->and($info->load)->toBe([0.5, 0.4, 0.3])
+            ->and($info->memAvailableBytes)->toBe(1024)
+            ->and($info->services[1])->toBe(['name' => 'docker', 'state' => 'failed'])
+            ->and($info->agentVersion)->toBe('0.2.0');
+    });
+
+    it('tolerates missing fields from an older agent', function () {
+        Http::fake(['agent/*' => Http::response(['version' => '0.1.0'])]);
+
+        expect(agentDriver()->systemInfo()->services)->toBe([]);
+    });
+
+    it('reads the Docker daemon, including an unreachable one', function () {
+        Http::fake(['agent/*' => Http::sequence()
+            ->push(['available' => true, 'server_version' => '27.1.0', 'containers' => 5, 'running' => 3, 'images' => 7])
+            ->push(['available' => false, 'error' => 'connection refused'])]);
+
+        $up = agentDriver()->dockerInfo();
+        $down = agentDriver()->dockerInfo();
+
+        expect($up->available)->toBeTrue()->and($up->serverVersion)->toBe('27.1.0')->and($up->running)->toBe(3)
+            ->and($down->available)->toBeFalse()->and($down->error)->toBe('connection refused');
+    });
+
+    it('reads images and nginx status', function () {
+        Http::fake(['agent/*' => Http::sequence()
+            ->push(['images' => [['tags' => ['commypanel/shop:2'], 'size_bytes' => 1000, 'created' => 5]]])
+            ->push(['available' => true, 'running' => true, 'version' => '1.26.2', 'config_ok' => false, 'config_output' => 'bad', 'sites' => [['name' => 'shop', 'domains' => ['a.example.com'], 'https' => true, 'modified' => 9]]])]);
+
+        $images = agentDriver()->listImages();
+        $nginx = agentDriver()->nginxStatus();
+
+        expect($images[0]->tags)->toBe(['commypanel/shop:2'])->and($images[0]->sizeBytes)->toBe(1000)
+            ->and($nginx->version)->toBe('1.26.2')->and($nginx->configOk)->toBeFalse()
+            ->and($nginx->sites[0])->toBe(['name' => 'shop', 'domains' => ['a.example.com'], 'https' => true, 'modified' => 9]);
+    });
+
+    it('tests and reloads nginx through the agent', function () {
+        Http::fake(['agent/*' => Http::sequence()->push(['ok' => false, 'output' => 'emerg'])->push(['ok' => true])]);
+
+        $result = agentDriver()->testNginx();
+        agentDriver()->reloadNginx();
+
+        expect($result->ok)->toBeFalse()->and($result->output)->toBe('emerg');
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v1/nginx/reload'));
+    });
+});

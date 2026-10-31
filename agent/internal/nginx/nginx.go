@@ -416,3 +416,98 @@ func writeAtomic(path string, data []byte) error {
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// SiteFile describes one config the agent wrote, for the panel's Server page.
+type SiteFile struct {
+	Name     string   `json:"name"`
+	Domains  []string `json:"domains"`
+	HTTPS    bool     `json:"https"`
+	Modified int64    `json:"modified"`
+}
+
+// Status is nginx as seen from the host.
+type Status struct {
+	Available    bool       `json:"available"`
+	Running      bool       `json:"running"`
+	Version      string     `json:"version"`
+	ConfigOK     bool       `json:"config_ok"`
+	ConfigOutput string     `json:"config_output"`
+	Sites        []SiteFile `json:"sites"`
+}
+
+// Status reports whether nginx runs, its version, whether its configuration
+// is valid, and the sites the agent manages.
+func (m *Manager) Status(ctx context.Context) Status {
+	st := Status{Sites: m.siteFiles()}
+	if m.cfg.DryRun {
+		st.ConfigOK = true
+		st.ConfigOutput = "dry-run: nginx is not contacted"
+		return st
+	}
+
+	out, err := m.run.Run(ctx, "nginx", "-v")
+	if err != nil && len(out) == 0 {
+		return st // not installed
+	}
+	st.Available = true
+	if match := nginxVersionRe.FindString(string(out)); match != "" {
+		st.Version = strings.TrimPrefix(match, "nginx/")
+	}
+	if state, _ := m.run.Run(ctx, "systemctl", "is-active", "nginx"); strings.TrimSpace(string(state)) == "active" {
+		st.Running = true
+	}
+	st.ConfigOK, st.ConfigOutput = m.Test(ctx)
+
+	return st
+}
+
+// Test runs `nginx -t` and returns its verdict and output.
+func (m *Manager) Test(ctx context.Context) (bool, string) {
+	if m.cfg.DryRun {
+		return true, "dry-run: nginx is not contacted"
+	}
+	out, err := m.run.Run(ctx, "nginx", "-t")
+	text := strings.TrimSpace(string(out))
+	if len(text) > 4000 {
+		text = text[:4000]
+	}
+	return err == nil, text
+}
+
+// Reload tests the configuration and reloads nginx gracefully.
+func (m *Manager) Reload(ctx context.Context) error {
+	return m.testAndReload(ctx)
+}
+
+var serverNameRe = regexp.MustCompile(`(?m)^\s*server_name\s+([^;]+);`)
+
+// siteFiles lists the site configs the agent manages, with their domains
+// read back from the files themselves.
+func (m *Manager) siteFiles() []SiteFile {
+	files, _ := filepath.Glob(filepath.Join(m.cfg.SitesDir, "commypanel-*.conf"))
+	sites := make([]SiteFile, 0, len(files))
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		site := SiteFile{
+			Name:  strings.TrimSuffix(strings.TrimPrefix(filepath.Base(file), "commypanel-"), ".conf"),
+			HTTPS: strings.Contains(string(raw), "ssl_certificate "),
+		}
+		if info, err := os.Stat(file); err == nil {
+			site.Modified = info.ModTime().Unix()
+		}
+		seen := map[string]bool{}
+		for _, match := range serverNameRe.FindAllStringSubmatch(string(raw), -1) {
+			for _, name := range strings.Fields(match[1]) {
+				if name != "_" && !seen[name] {
+					seen[name] = true
+					site.Domains = append(site.Domains, name)
+				}
+			}
+		}
+		sites = append(sites, site)
+	}
+	return sites
+}

@@ -9,5 +9,6 @@ final readonly class ContainerInfo
         public string $image,
         public string $state,
         public string $status,
+        public int $created = 0,
     ) {}
 }

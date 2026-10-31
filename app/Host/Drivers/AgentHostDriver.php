@@ -6,8 +6,13 @@ use App\Host\Data\CertificateInfo;
 use App\Host\Data\CertificateRequest;
 use App\Host\Data\ContainerInfo;
 use App\Host\Data\ContainerSpec;
+use App\Host\Data\DockerInfo;
+use App\Host\Data\HostInfo;
 use App\Host\Data\ImageBuildSpec;
+use App\Host\Data\ImageInfo;
 use App\Host\Data\NginxSite;
+use App\Host\Data\NginxStatus;
+use App\Host\Data\NginxTestResult;
 use App\Host\Data\ResourceName;
 use App\Host\Data\SystemStatus;
 use App\Host\Exceptions\DockerUnavailable;
@@ -37,6 +42,98 @@ class AgentHostDriver implements HostDriver
             nginxAvailable: (bool) ($data['nginx_available'] ?? false),
             diskFreeBytes: (int) ($data['disk_free_bytes'] ?? 0),
         );
+    }
+
+    public function systemInfo(): HostInfo
+    {
+        $data = $this->send('get', '/v1/system/info');
+        $info = $data['info'] ?? [];
+        $load = array_values($info['load'] ?? []);
+
+        return new HostInfo(
+            hostname: (string) ($info['hostname'] ?? ''),
+            os: (string) ($info['os'] ?? ''),
+            kernel: (string) ($info['kernel'] ?? ''),
+            arch: (string) ($info['arch'] ?? ''),
+            cpus: (int) ($info['cpus'] ?? 0),
+            uptimeSeconds: (int) ($info['uptime_seconds'] ?? 0),
+            load: [(float) ($load[0] ?? 0), (float) ($load[1] ?? 0), (float) ($load[2] ?? 0)],
+            memTotalBytes: (int) ($info['mem_total_bytes'] ?? 0),
+            memAvailableBytes: (int) ($info['mem_available_bytes'] ?? 0),
+            diskTotalBytes: (int) ($info['disk_total_bytes'] ?? 0),
+            diskFreeBytes: (int) ($info['disk_free_bytes'] ?? 0),
+            services: array_values(array_map(
+                fn (array $s) => ['name' => (string) ($s['name'] ?? ''), 'state' => (string) ($s['state'] ?? 'unknown')],
+                $info['services'] ?? [],
+            )),
+            agentVersion: (string) ($data['version'] ?? ''),
+        );
+    }
+
+    public function dockerInfo(): DockerInfo
+    {
+        $d = $this->send('get', '/v1/docker/info');
+
+        return new DockerInfo(
+            available: (bool) ($d['available'] ?? false),
+            error: isset($d['error']) ? (string) $d['error'] : null,
+            serverVersion: (string) ($d['server_version'] ?? ''),
+            apiVersion: (string) ($d['api_version'] ?? ''),
+            os: (string) ($d['os'] ?? ''),
+            arch: (string) ($d['arch'] ?? ''),
+            kernelVersion: (string) ($d['kernel_version'] ?? ''),
+            storageDriver: (string) ($d['storage_driver'] ?? ''),
+            cgroupDriver: (string) ($d['cgroup_driver'] ?? ''),
+            containers: (int) ($d['containers'] ?? 0),
+            running: (int) ($d['running'] ?? 0),
+            paused: (int) ($d['paused'] ?? 0),
+            stopped: (int) ($d['stopped'] ?? 0),
+            images: (int) ($d['images'] ?? 0),
+            cpus: (int) ($d['cpus'] ?? 0),
+            memTotalBytes: (int) ($d['mem_total_bytes'] ?? 0),
+        );
+    }
+
+    public function listImages(): array
+    {
+        $data = $this->send('get', '/v1/docker/images');
+
+        return array_values(array_map(fn (array $i) => new ImageInfo(
+            tags: array_values(array_map('strval', $i['tags'] ?? [])),
+            sizeBytes: (int) ($i['size_bytes'] ?? 0),
+            created: (int) ($i['created'] ?? 0),
+        ), $data['images'] ?? []));
+    }
+
+    public function nginxStatus(): NginxStatus
+    {
+        $d = $this->send('get', '/v1/nginx/status');
+
+        return new NginxStatus(
+            available: (bool) ($d['available'] ?? false),
+            running: (bool) ($d['running'] ?? false),
+            version: (string) ($d['version'] ?? ''),
+            configOk: (bool) ($d['config_ok'] ?? false),
+            configOutput: (string) ($d['config_output'] ?? ''),
+            sites: array_values(array_map(fn (array $s) => [
+                'name' => (string) ($s['name'] ?? ''),
+                'domains' => array_values(array_map('strval', $s['domains'] ?? [])),
+                'https' => (bool) ($s['https'] ?? false),
+                'modified' => (int) ($s['modified'] ?? 0),
+            ], $d['sites'] ?? [])),
+        );
+    }
+
+    public function testNginx(): NginxTestResult
+    {
+        $d = $this->send('post', '/v1/nginx/test');
+
+        return new NginxTestResult((bool) ($d['ok'] ?? false), (string) ($d['output'] ?? ''));
+    }
+
+    public function reloadNginx(): void
+    {
+        $this->send('post', '/v1/nginx/reload');
     }
 
     public function applyNginxSite(NginxSite $site): void
@@ -197,6 +294,7 @@ class AgentHostDriver implements HostDriver
             image: (string) ($c['image'] ?? ''),
             state: (string) ($c['state'] ?? ''),
             status: (string) ($c['status'] ?? ''),
+            created: (int) ($c['created'] ?? 0),
         ), $data['containers'] ?? []));
     }
 

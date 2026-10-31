@@ -14,6 +14,9 @@ use App\Http\Controllers\DomainController;
 use App\Http\Controllers\EnvVarController;
 use App\Http\Controllers\HttpsController;
 use App\Http\Controllers\ServerAddressController;
+use App\Http\Controllers\ServerController;
+use App\Http\Controllers\ServerDockerController;
+use App\Http\Controllers\ServerNginxController;
 use App\Http\Controllers\SetupController;
 use App\Http\Controllers\WelcomeController;
 use Illuminate\Support\Facades\Route;
@@ -56,6 +59,17 @@ Route::middleware('auth')->group(function () {
         Route::post('activate', [AppStateController::class, 'activate'])->name('activate');
         Route::post('env/import', [EnvVarController::class, 'import'])->name('env.import');
         Route::post('certificate', [CertificateController::class, 'store'])->name('certificate.store');
+    });
+
+    Route::prefix('server')->name('server.')->group(function () {
+        Route::get('/', [ServerController::class, 'index'])->name('index');
+        Route::get('docker', [ServerDockerController::class, 'index'])->name('docker');
+        Route::post('docker/prune', [ServerDockerController::class, 'prune'])->name('docker.prune');
+        Route::get('docker/containers/{name}/logs', [ServerDockerController::class, 'logs'])
+            ->where('name', '[a-z0-9][a-z0-9-]*')->name('docker.logs');
+        Route::get('nginx', [ServerNginxController::class, 'index'])->name('nginx');
+        Route::post('nginx/test', [ServerNginxController::class, 'test'])->name('nginx.test');
+        Route::post('nginx/reload', [ServerNginxController::class, 'reload'])->name('nginx.reload');
     });
 
     Route::get('welcome', [WelcomeController::class, 'show'])->name('welcome');

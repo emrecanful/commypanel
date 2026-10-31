@@ -54,6 +54,25 @@ it('reports system status', function () {
     expect($status->diskFreeBytes)->toBeGreaterThan(0);
 });
 
+it('serves the server page data against the real agent', function () {
+    $this->driver->applyNginxSite(new NginxSite('demo', ['demo.example.com'], 20001));
+
+    $host = $this->driver->systemInfo();
+    $docker = $this->driver->dockerInfo();
+    $nginx = $this->driver->nginxStatus();
+
+    expect($host->cpus)->toBeGreaterThan(0)
+        ->and($host->diskTotalBytes)->toBeGreaterThan(0)
+        ->and($host->services)->not->toBeEmpty()
+        ->and($docker->available)->toBeFalse()
+        ->and($this->driver->listImages())->toBe([])
+        ->and($nginx->sites[0]['name'])->toBe('demo')
+        ->and($nginx->sites[0]['domains'])->toBe(['demo.example.com'])
+        ->and($this->driver->testNginx()->ok)->toBeTrue();
+
+    $this->driver->reloadNginx();
+});
+
 it('applies and removes an nginx site', function () {
     $this->driver->applyNginxSite(new NginxSite('demo', ['demo.example.com'], 20001));
 

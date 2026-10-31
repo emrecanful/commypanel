@@ -70,6 +70,12 @@ func (f *fakeDaemon) handler() http.Handler {
 				f.buildTar = append(f.buildTar, hdr.Name)
 			}
 			w.Write([]byte(f.buildReply))
+		case r.URL.Path == "/version":
+			w.Write([]byte(`{"Version":"27.1.0","ApiVersion":"1.46","Os":"linux","Arch":"amd64","KernelVersion":"6.8.0"}`))
+		case r.URL.Path == "/info":
+			w.Write([]byte(`{"Containers":5,"ContainersRunning":3,"ContainersPaused":0,"ContainersStopped":2,"Images":7,"Driver":"overlay2","CgroupDriver":"systemd","NCPU":4,"MemTotal":4294967296}`))
+		case r.URL.Path == "/images/json":
+			w.Write([]byte(`[{"RepoTags":["commypanel/old:1","other:latest"],"Size":100,"Created":10},{"RepoTags":["commypanel/new:2"],"Size":200,"Created":20},{"RepoTags":["nginx:latest"],"Size":1,"Created":30}]`))
 		case r.URL.Path == "/images/prune":
 			w.Write([]byte(`{"SpaceReclaimed":1234}`))
 		default:
@@ -361,5 +367,47 @@ func TestRemoveImage(t *testing.T) {
 		if err := m.RemoveImage(context.Background(), tag); err == nil {
 			t.Errorf("%q must be rejected", tag)
 		}
+	}
+}
+
+func TestInfoSummarisesTheDaemon(t *testing.T) {
+	m, _, _ := setup(t)
+
+	info, err := m.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !info.Available || info.ServerVersion != "27.1.0" || info.StorageDriver != "overlay2" || info.Running != 3 || info.Images != 7 || info.CPUs != 4 {
+		t.Errorf("info = %+v", info)
+	}
+}
+
+func TestInfoReportsAnUnreachableDaemonInsteadOfFailing(t *testing.T) {
+	m := NewManager(Config{DataDir: t.TempDir()}, NewEngine("http://127.0.0.1:1", nil))
+
+	info, err := m.Info(context.Background())
+
+	if err != nil {
+		t.Fatalf("an unreachable daemon is a state, not an error: %v", err)
+	}
+	if info.Available || info.Error == "" {
+		t.Errorf("info = %+v", info)
+	}
+}
+
+func TestListImagesKeepsOnlyOurNamespaceNewestFirst(t *testing.T) {
+	m, _, _ := setup(t)
+
+	images, err := m.ListImages(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(images) != 2 || images[0].Tags[0] != "commypanel/new:2" || images[1].Tags[0] != "commypanel/old:1" {
+		t.Fatalf("images = %+v", images)
+	}
+	if len(images[1].Tags) != 1 {
+		t.Errorf("foreign tags must be dropped: %+v", images[1].Tags)
 	}
 }

@@ -18,9 +18,10 @@ import (
 )
 
 type fakeNginx struct {
-	applied []nginx.Site
-	removed []string
-	err     error
+	applied  []nginx.Site
+	removed  []string
+	reloaded int
+	err      error
 }
 
 func (f *fakeNginx) Apply(_ context.Context, s nginx.Site) error {
@@ -28,6 +29,17 @@ func (f *fakeNginx) Apply(_ context.Context, s nginx.Site) error {
 		return err
 	}
 	f.applied = append(f.applied, s)
+	return f.err
+}
+
+func (f *fakeNginx) Status(context.Context) nginx.Status {
+	return nginx.Status{Available: true, Running: true, Version: "1.26.0", ConfigOK: true, ConfigOutput: "ok", Sites: []nginx.SiteFile{{Name: "demo", Domains: []string{"demo.example.com"}}}}
+}
+
+func (f *fakeNginx) Test(context.Context) (bool, string) { return f.err == nil, "syntax is ok" }
+
+func (f *fakeNginx) Reload(context.Context) error {
+	f.reloaded++
 	return f.err
 }
 
@@ -172,6 +184,14 @@ func (f *fakeDocker) Build(_ context.Context, _ docker.BuildSpec, onLine func(st
 	return f.buildErr
 }
 func (f *fakeDocker) PruneImages(context.Context) (uint64, error) { return 99, f.err }
+func (f *fakeDocker) Info(context.Context) (docker.Info, error) {
+	return docker.Info{Available: true, ServerVersion: "27.0.1", Containers: 3, Running: 2}, f.err
+}
+
+func (f *fakeDocker) ListImages(context.Context) ([]docker.ImageInfo, error) {
+	return []docker.ImageInfo{{Tags: []string{"commypanel/demo:1"}, Size: 1234}}, f.err
+}
+
 func (f *fakeDocker) RemoveImage(_ context.Context, tag string) error {
 	if !strings.HasPrefix(tag, "commypanel/") {
 		return &validate.InputError{Msg: "only commypanel/ images can be removed"}
@@ -331,5 +351,43 @@ func TestCertificateInfoAndRemove(t *testing.T) {
 	}
 	if rec := do(t, s, "DELETE", "/v1/certificates/shop", ""); rec.Code != 200 || f.removed[0] != "shop" {
 		t.Errorf("remove: %d %v", rec.Code, f.removed)
+	}
+}
+
+func TestServerPageEndpoints(t *testing.T) {
+	n := &fakeNginx{}
+	s := New(Options{
+		Nginx: n, Docker: &fakeDocker{}, Authorize: AllowAll(), Version: "test",
+		Info: func(context.Context) system.Info {
+			return system.Info{Hostname: "box", Services: []system.Service{{Name: "nginx", State: "active"}}}
+		},
+	})
+
+	for path, want := range map[string]string{
+		"/v1/system/info":   `"hostname":"box"`,
+		"/v1/nginx/status":  `"version":"1.26.0"`,
+		"/v1/docker/info":   `"server_version":"27.0.1"`,
+		"/v1/docker/images": `"commypanel/demo:1"`,
+	} {
+		rec := do(t, s, "GET", path, "")
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("GET %s = %d %s, want %s", path, rec.Code, rec.Body.String(), want)
+		}
+	}
+
+	if rec := do(t, s, "POST", "/v1/nginx/test", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Errorf("test = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, s, "POST", "/v1/nginx/reload", ""); rec.Code != http.StatusOK || n.reloaded != 1 {
+		t.Errorf("reload = %d, reloaded %d times", rec.Code, n.reloaded)
+	}
+}
+
+func TestServerPageEndpointsNeedAuthorization(t *testing.T) {
+	s := New(Options{Nginx: &fakeNginx{}, Docker: &fakeDocker{}})
+	for _, path := range []string{"/v1/system/info", "/v1/nginx/status", "/v1/docker/info", "/v1/docker/images"} {
+		if rec := do(t, s, "GET", path, ""); rec.Code != http.StatusForbidden {
+			t.Errorf("GET %s = %d, want 403", path, rec.Code)
+		}
 	}
 }

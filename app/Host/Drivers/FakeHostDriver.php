@@ -6,8 +6,13 @@ use App\Host\Data\CertificateInfo;
 use App\Host\Data\CertificateRequest;
 use App\Host\Data\ContainerInfo;
 use App\Host\Data\ContainerSpec;
+use App\Host\Data\DockerInfo;
+use App\Host\Data\HostInfo;
 use App\Host\Data\ImageBuildSpec;
+use App\Host\Data\ImageInfo;
 use App\Host\Data\NginxSite;
+use App\Host\Data\NginxStatus;
+use App\Host\Data\NginxTestResult;
 use App\Host\Data\ResourceName;
 use App\Host\Data\SystemStatus;
 use App\Host\Exceptions\HostOperationFailed;
@@ -28,6 +33,9 @@ class FakeHostDriver implements HostDriver
     /** @var array<string, NginxSite> */
     private array $sites = [];
 
+    /** @var list<string> */
+    private array $images = [];
+
     /** @var array<string, ContainerSpec> */
     private array $containers = [];
 
@@ -37,6 +45,58 @@ class FakeHostDriver implements HostDriver
     public function systemStatus(): SystemStatus
     {
         return new SystemStatus(dockerAvailable: true, nginxAvailable: true, diskFreeBytes: 50 * 1024 ** 3);
+    }
+
+    public function systemInfo(): HostInfo
+    {
+        return new HostInfo(
+            hostname: 'fake-host', os: 'Fake Linux 1.0', kernel: '6.8.0-fake', arch: 'amd64', cpus: 4,
+            uptimeSeconds: 3 * 86400, load: [0.4, 0.3, 0.2],
+            memTotalBytes: 4 * 1024 ** 3, memAvailableBytes: 3 * 1024 ** 3,
+            diskTotalBytes: 100 * 1024 ** 3, diskFreeBytes: 50 * 1024 ** 3,
+            services: array_map(fn (string $name) => ['name' => $name, 'state' => 'active'], [
+                'nginx', 'docker', 'commypanel-agent', 'commypanel-queue@1', 'commypanel-queue@2', 'commypanel-scheduler', 'php8.4-fpm',
+            ]),
+            agentVersion: 'fake',
+        );
+    }
+
+    public function dockerInfo(): DockerInfo
+    {
+        $running = count($this->containers);
+
+        return new DockerInfo(
+            available: true, serverVersion: '27.0.0-fake', apiVersion: '1.46', os: 'linux', arch: 'amd64',
+            kernelVersion: '6.8.0-fake', storageDriver: 'overlay2', cgroupDriver: 'systemd',
+            containers: $running, running: $running, images: count($this->images), cpus: 4, memTotalBytes: 4 * 1024 ** 3,
+        );
+    }
+
+    public function listImages(): array
+    {
+        return array_map(fn (string $tag) => new ImageInfo([$tag], 120 * 1024 ** 2, time() - 3600), $this->images);
+    }
+
+    public function nginxStatus(): NginxStatus
+    {
+        return new NginxStatus(
+            available: true, running: true, version: '1.26.0-fake', configOk: true, configOutput: 'syntax is ok',
+            sites: array_values(array_map(fn (NginxSite $site) => [
+                'name' => $site->name, 'domains' => $site->domains, 'https' => $site->certificate !== null, 'modified' => time(),
+            ], $this->sites)),
+        );
+    }
+
+    public function testNginx(): NginxTestResult
+    {
+        $this->record('testNginx', []);
+
+        return new NginxTestResult(true, 'syntax is ok');
+    }
+
+    public function reloadNginx(): void
+    {
+        $this->record('reloadNginx', []);
     }
 
     public function applyNginxSite(NginxSite $site): void
@@ -55,6 +115,7 @@ class FakeHostDriver implements HostDriver
     public function buildImage(ImageBuildSpec $spec, ?callable $onOutput = null): void
     {
         $this->record('buildImage', ['spec' => $spec]);
+        $this->images[] = $spec->tag;
 
         if ($onOutput !== null) {
             $onOutput("[fake] building {$spec->tag}");
@@ -116,6 +177,7 @@ class FakeHostDriver implements HostDriver
     public function removeImage(string $tag): void
     {
         $this->record('removeImage', ['tag' => $tag]);
+        $this->images = array_values(array_filter($this->images, fn (string $t) => $t !== $tag));
     }
 
     public function listContainers(): array

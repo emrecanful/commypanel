@@ -82,10 +82,11 @@ type ContainerSpec struct {
 
 // ContainerInfo describes a managed container.
 type ContainerInfo struct {
-	Name   string `json:"name"`
-	Image  string `json:"image"`
-	State  string `json:"state"`
-	Status string `json:"status"`
+	Name    string `json:"name"`
+	Image   string `json:"image"`
+	State   string `json:"state"`
+	Status  string `json:"status"`
+	Created int64  `json:"created"`
 }
 
 // Manager runs the Docker actions.
@@ -320,10 +321,11 @@ func (m *Manager) List(ctx context.Context) ([]ContainerInfo, error) {
 	}
 	filters, _ := json.Marshal(map[string][]string{"label": {ManagedLabel + "=true"}})
 	var raw []struct {
-		Names  []string `json:"Names"`
-		Image  string   `json:"Image"`
-		State  string   `json:"State"`
-		Status string   `json:"Status"`
+		Names   []string `json:"Names"`
+		Image   string   `json:"Image"`
+		State   string   `json:"State"`
+		Status  string   `json:"Status"`
+		Created int64    `json:"Created"`
 	}
 	if err := m.engine.doJSON(ctx, "GET", "/containers/json", url.Values{"all": {"true"}, "filters": {string(filters)}}, nil, &raw); err != nil {
 		return nil, err
@@ -334,7 +336,7 @@ func (m *Manager) List(ctx context.Context) ([]ContainerInfo, error) {
 		if len(c.Names) > 0 {
 			name = strings.TrimPrefix(c.Names[0], "/")
 		}
-		out = append(out, ContainerInfo{Name: name, Image: c.Image, State: c.State, Status: c.Status})
+		out = append(out, ContainerInfo{Name: name, Image: c.Image, State: c.State, Status: c.Status, Created: c.Created})
 	}
 	return out, nil
 }

@@ -9,6 +9,7 @@ import {
     Menu,
     Palette,
     ScrollText,
+    Server,
     ShieldCheck,
     X,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ const NAV: { heading: string; items: NavItem[] }[] = [
             { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { href: '/apps', label: 'Apps', icon: Boxes },
             { href: '/domains', label: 'Domains', icon: Globe },
+            { href: '/server', label: 'Server', icon: Server },
         ],
     },
     {

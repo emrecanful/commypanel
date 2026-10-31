@@ -365,3 +365,49 @@ func TestRejectsBadRedirects(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusReportsVersionConfigAndSites(t *testing.T) {
+	run := &fakeRunner{version: "nginx version: nginx/1.26.2"}
+	m, dir := newManager(t, run, false)
+	if err := m.Apply(context.Background(), Site{Name: "shop", Domains: []string{"shop.example.com", "www.shop.example.com"}, UpstreamPort: 20001, Certificate: "shop"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = dir
+
+	st := m.Status(context.Background())
+
+	if !st.Available || st.Version != "1.26.2" || !st.ConfigOK {
+		t.Errorf("status = %+v", st)
+	}
+	if len(st.Sites) != 1 || st.Sites[0].Name != "shop" || !st.Sites[0].HTTPS {
+		t.Fatalf("sites = %+v", st.Sites)
+	}
+	if got := strings.Join(st.Sites[0].Domains, ","); got != "shop.example.com,www.shop.example.com" {
+		t.Errorf("domains = %q", got)
+	}
+}
+
+func TestStatusShowsAFailingConfig(t *testing.T) {
+	run := &fakeRunner{version: "nginx version: nginx/1.24.0", failOn: "test"}
+	m, _ := newManager(t, run, false)
+
+	st := m.Status(context.Background())
+
+	if st.ConfigOK || !strings.Contains(st.ConfigOutput, "bad config") {
+		t.Errorf("status = %+v", st)
+	}
+}
+
+func TestReloadTestsFirst(t *testing.T) {
+	run := &fakeRunner{failOn: "test"}
+	m, _ := newManager(t, run, false)
+
+	if err := m.Reload(context.Background()); err == nil {
+		t.Fatal("reload must fail when the configuration is invalid")
+	}
+	for _, call := range run.calls {
+		if strings.HasSuffix(call, "reload") {
+			t.Errorf("must not reload a broken config: %v", run.calls)
+		}
+	}
+}
