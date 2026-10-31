@@ -4,6 +4,7 @@ import AppController from '@/actions/App/Http/Controllers/AppController';
 import AppSetupController from '@/actions/App/Http/Controllers/AppSetupController';
 import { PageHeader } from '@/components/page-header';
 import { Card } from '@/components/ui/card';
+import { useCan } from '@/lib/permissions';
 import { StatusBadge } from '@/components/ui/status-badge';
 import AppLayout from '@/layouts/app-layout';
 import { formatDate } from '@/lib/format';
@@ -12,7 +13,8 @@ import type { AppSummary } from '@/types';
 type Props = { apps: AppSummary[] };
 
 export default function Index({ apps }: Props) {
-    const newApp = (
+    const can = useCan();
+    const newApp = can('apps.create') && (
         <Link href={AppController.create()} className="btn btn-primary">
             <Plus className="size-4" aria-hidden />
             New app

@@ -4,6 +4,7 @@ import {
     Globe,
     ChevronsLeft,
     ChevronsRight,
+    KeyRound,
     LayoutDashboard,
     LogOut,
     Menu,
@@ -11,6 +12,8 @@ import {
     ScrollText,
     Server,
     ShieldCheck,
+    UserCog,
+    Users,
     X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -23,16 +26,60 @@ import { Dropdown, DropdownItem } from '@/components/ui/dropdown';
 import { fortify } from '@/lib/fortify';
 import { cn } from '@/lib/utils';
 
-type NavItem = { href: string; label: string; icon: LucideIcon };
+type NavItem = {
+    href: string;
+    label: string;
+    icon: LucideIcon;
+    /** Hidden unless the user holds this permission. */
+    permission?: string;
+};
 
 const NAV: { heading: string; items: NavItem[] }[] = [
     {
         heading: 'Menu',
         items: [
             { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-            { href: '/apps', label: 'Apps', icon: Boxes },
-            { href: '/domains', label: 'Domains', icon: Globe },
-            { href: '/server', label: 'Server', icon: Server },
+            {
+                href: '/apps',
+                label: 'Apps',
+                icon: Boxes,
+                permission: 'apps.view',
+            },
+            {
+                href: '/domains',
+                label: 'Domains',
+                icon: Globe,
+                permission: 'domains.view',
+            },
+            {
+                href: '/server',
+                label: 'Server',
+                icon: Server,
+                permission: 'server.view',
+            },
+        ],
+    },
+    {
+        heading: 'Access',
+        items: [
+            {
+                href: '/users',
+                label: 'Users',
+                icon: Users,
+                permission: 'users.view',
+            },
+            {
+                href: '/roles',
+                label: 'Roles',
+                icon: UserCog,
+                permission: 'roles.view',
+            },
+            {
+                href: '/permissions',
+                label: 'Permissions',
+                icon: KeyRound,
+                permission: 'permissions.view',
+            },
         ],
     },
     {
@@ -52,6 +99,7 @@ const NAV: { heading: string; items: NavItem[] }[] = [
                 href: '/settings/audit-log',
                 label: 'Audit log',
                 icon: ScrollText,
+                permission: 'audit.view',
             },
         ],
     },
@@ -75,6 +123,17 @@ type SidebarProps = {
 };
 
 function Sidebar({ collapsed, url, name, onNavigate }: SidebarProps) {
+    const { permissions } = usePage().props.auth;
+    // Only what the user may open; a group with nothing left disappears.
+    const visibleNav = NAV.map((group) => ({
+        ...group,
+        items: group.items.filter(
+            (item) =>
+                item.permission === undefined ||
+                permissions.includes(item.permission),
+        ),
+    })).filter((group) => group.items.length > 0);
+
     return (
         <div className="flex h-full flex-col">
             <div
@@ -89,7 +148,7 @@ function Sidebar({ collapsed, url, name, onNavigate }: SidebarProps) {
                 aria-label="Main navigation"
                 className="flex-1 space-y-6 overflow-y-auto px-3 py-4"
             >
-                {NAV.map((group) => (
+                {visibleNav.map((group) => (
                     <div key={group.heading}>
                         <p
                             className={cn(

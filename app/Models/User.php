@@ -11,11 +11,13 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
 use Laravel\Fortify\TwoFactorAuthenticatable;
+use Spatie\Permission\Traits\HasRoles;
 
 /**
  * @property int $id
  * @property string $name
  * @property string $email
+ * @property bool $is_super
  * @property Carbon|null $email_verified_at
  * @property string $password
  * @property string|null $remember_token
@@ -30,7 +32,16 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable, TwoFactorAuthenticatable;
+    use HasFactory, HasRoles, Notifiable, TwoFactorAuthenticatable;
+
+    /**
+     * The account created through the setup link: it can do everything and is
+     * never changed or deleted from the panel (only `admin:reset` recovers it).
+     */
+    public function isSuper(): bool
+    {
+        return $this->is_super;
+    }
 
     /**
      * Get the attributes that should be cast.
@@ -40,6 +51,7 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
+            'is_super' => 'boolean',
             'email_verified_at' => 'datetime',
             'two_factor_confirmed_at' => 'datetime',
             'password' => 'hashed',

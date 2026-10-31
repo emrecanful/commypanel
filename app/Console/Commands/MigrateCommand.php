@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Auth\SyncRolesAndPermissions;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -42,6 +43,11 @@ class MigrateCommand extends Command
                 return $status;
             }
         }
+
+        // New releases may add permissions; keep them and the admin role current.
+        // Before the first user exists there is nothing to protect yet, and the setup
+        // step creates them, but doing it here as well is harmless.
+        app(SyncRolesAndPermissions::class)();
 
         return self::SUCCESS;
     }

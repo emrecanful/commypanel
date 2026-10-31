@@ -23,6 +23,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Tabs, tabPanelProps } from '@/components/ui/tabs';
 import type { TabItem } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/app-layout';
+import { useCan } from '@/lib/permissions';
 import type { AppSettings, DeploymentSummary, ServerAddress } from '@/types';
 
 type Props = {
@@ -72,6 +73,7 @@ export default function Show({
     server,
 }: Props) {
     const { errors } = usePage().props;
+    const can = useCan();
     const [deploying, setDeploying] = useState(false);
     const [tab, setTab] = useState<TabId>(initialTab);
 
@@ -169,14 +171,16 @@ export default function Show({
                         >
                             All apps
                         </Link>
-                        <Button
-                            onClick={deploy}
-                            loading={deploying}
-                            disabled={app.status === 'deploying'}
-                        >
-                            <Rocket className="size-4" aria-hidden />
-                            Deploy
-                        </Button>
+                        {can('apps.deploy') && (
+                            <Button
+                                onClick={deploy}
+                                loading={deploying}
+                                disabled={app.status === 'deploying'}
+                            >
+                                <Rocket className="size-4" aria-hidden />
+                                Deploy
+                            </Button>
+                        )}
                     </>
                 }
             />

@@ -16,5 +16,8 @@ export type TwoFactorState = {
 
 export type Auth = {
     user: User;
+    isSuper: boolean;
+    /** Every permission the signed-in user holds (all of them for the super user). */
+    permissions: string[];
     twoFactor: TwoFactorState;
 };

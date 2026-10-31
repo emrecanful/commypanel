@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Audit\AuditLogger;
+use App\Auth\SyncRolesAndPermissions;
 use App\Models\SetupToken;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -22,7 +23,7 @@ class SetupController extends Controller
         return Inertia::render('auth/setup', ['token' => $token]);
     }
 
-    public function store(Request $request, string $token, AuditLogger $audit): RedirectResponse
+    public function store(Request $request, string $token, AuditLogger $audit, SyncRolesAndPermissions $sync): RedirectResponse
     {
         $this->authorizeSetup($token);
 
@@ -39,8 +40,15 @@ class SetupController extends Controller
 
             $setupToken->forceFill(['used_at' => now()])->save();
 
-            return User::query()->create([...$data, 'email_verified_at' => now()]);
+            $user = User::query()->create([...$data, 'email_verified_at' => now()]);
+            // The first account is the super user. The flag is never mass-assignable.
+            $user->forceFill(['is_super' => true])->save();
+
+            return $user;
         });
+
+        // First run: create the permissions and the "admin" role (nobody holds it yet).
+        $sync();
 
         $audit->record('setup.completed', $user);
 

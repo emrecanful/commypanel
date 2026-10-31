@@ -29,8 +29,18 @@ class UserFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
+            // Most tests act as someone who may do anything; use regular() for the rest.
+            'is_super' => true,
             'remember_token' => Str::random(10),
         ];
+    }
+
+    /**
+     * An ordinary account: it can do only what its role allows.
+     */
+    public function regular(): static
+    {
+        return $this->state(fn (array $attributes) => ['is_super' => false]);
     }
 
     /**

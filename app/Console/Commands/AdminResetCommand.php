@@ -9,18 +9,21 @@ use Illuminate\Support\Str;
 
 class AdminResetCommand extends Command
 {
-    protected $signature = 'admin:reset {email? : Email of the account to reset}';
+    protected $signature = 'admin:reset {email? : Email of the account to reset (default: the super user)}';
 
-    protected $description = 'Set a new random password for an admin and switch off its two-factor authentication';
+    protected $description = 'Set a new random password for the super user (or another account) and switch off its two-factor authentication';
 
     public function handle(AuditLogger $audit): int
     {
-        $email = $this->argument('email') ?? $this->ask('Email of the account to reset');
+        $email = $this->argument('email');
 
-        $user = User::query()->where('email', $email)->first();
+        // The super user cannot be changed from the panel, so this command is how it is recovered.
+        $user = $email === null
+            ? User::query()->where('is_super', true)->first()
+            : User::query()->where('email', $email)->first();
 
         if ($user === null) {
-            $this->components->error('No user with that email.');
+            $this->components->error($email === null ? 'There is no super user yet. Finish the setup first.' : 'No user with that email.');
 
             return self::FAILURE;
         }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Auth\UserAccess;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -44,6 +45,8 @@ class HandleInertiaRequests extends Middleware
             ],
             'auth' => [
                 'user' => $request->user(),
+                'isSuper' => $request->user()?->isSuper() ?? false,
+                'permissions' => $request->user() === null ? [] : app(UserAccess::class)->permissionsOf($request->user()),
                 'twoFactor' => [
                     'enabled' => $request->user()?->two_factor_confirmed_at !== null,
                     'pending' => $request->user() !== null

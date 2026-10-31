@@ -16,10 +16,12 @@ use App\Dns\SystemDnsResolver;
 use App\Host\Drivers\AgentHostDriver;
 use App\Host\Drivers\FakeHostDriver;
 use App\Host\HostDriver;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use RuntimeException;
@@ -61,6 +63,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // The super user passes every check; everyone else needs the permission.
+        Gate::before(fn (User $user) => $user->isSuper() ? true : null);
+
         $this->configureDefaults();
 
         Event::subscribe(AuditEventSubscriber::class);
